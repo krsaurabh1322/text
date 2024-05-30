@@ -1,1 +1,1034 @@
-hi
+
+Flow Diagram: Data Transfer with Status Tracking and Change Streams
+This flow diagram illustrates the data transfer process with status tracking and change streams:
+
+Start
+
+Python Script:
+Reads data from Hive.
+Uploads data to the designated collection (e.g., data_collection) in MongoDB.
+Creates a document in the "status collection" with the following fields:
+collection: Name of the data collection in MongoDB (value: data_collection).
+status: Set to "uploaded" (initial status).
+timestamp: Current UTC timestamp of upload completion.
+Java Application: (Monitors change stream)
+Connects to MongoDB database.
+Creates a change stream on the "status collection."
+Filters the change stream for documents with status equal to "uploaded."
+Change Stream Notification: (Triggered on "uploaded" status)
+Java application receives notification from the change stream about a successful upload.
+Extracts the timestamp from the status update document.
+(Optional) Retrieves the latest timestamp from the status collection to ensure processing only new data.
+Data Transfer (Java):
+Performs a batch copy operation from the MongoDB data collection (e.g., data_collection) to the designated table in PostgreSQL.
+Uses a timestamp query to filter data based on the extracted timestamp (or the latest timestamp retrieved). This ensures copying only documents uploaded since the last successful run.
+Status Update (Java): (After successful transfer)
+Updates the status in the status collection for the corresponding entry to "consumed." This indicates successful processing of the data.
+(Optional) Updates the lastCopiedTimestamp variable in the Java application to reflect the most recently copied data.
+End
+
+Flow Diagram Symbols:
+
+Rectangles: Represent processes or actions.
+Diamonds: Represent decision points.
+Arrows: Denote the flow of data or control.
+Collection Fields:
+
+data_collection (MongoDB):
+Fields specific to your data (replace with your actual field names)
+_id (MongoDB document identifier)
+(Optional) timestamp (can be included here or stored separately)
+status_collection (MongoDB):
+_id (MongoDB document identifier)
+collection (name of the data collection in MongoDB)
+status ("uploaded" or "consumed")
+timestamp (timestamp of upload completion)
+Status Values:
+
+"uploaded": Indicates successful upload to MongoDB.
+"consumed": Indicates successful processing of the data in PostgreSQL.
+
+=============================
+
+from pymongo import MongoClient
+from datetime import datetime
+import pytz
+
+# MongoDB connection settings
+MONGO_HOST = 'localhost'
+MONGO_PORT = 27017
+MONGO_DB_NAME = 'your_db'
+DATA_COLLECTION_NAME = 'data_collection'
+STATUS_COLLECTION_NAME = 'status_collection'
+
+def upload_data_to_mongo(data):
+    client = MongoClient(MONGO_HOST, MONGO_PORT)
+    db = client[MONGO_DB_NAME]
+    data_collection = db[DATA_COLLECTION_NAME]
+    status_collection = db[STATUS_COLLECTION_NAME]
+    
+    # Insert data into the data collection
+    data_collection.insert_many(data)
+    
+    # Update the status collection
+    status_doc = {
+        'collection': DATA_COLLECTION_NAME,
+        'status': 'uploaded',
+        'timestamp': datetime.now(pytz.utc)
+    }
+    status_collection.insert_one(status_doc)
+    client.close()
+
+# Example data from Hive
+hive_data = [
+    {'field1': 'value1', 'field2': 123},
+    {'field1': 'value2', 'field2': 456},
+    # Add more documents as needed
+]
+
+# Upload data and update status
+upload_data_to_mongo(hive_data)
+===============================
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Aggregates;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.changestream.ChangeStreamDocument;
+import com.mongodb.client.model.changestream.OperationType;
+import org.bson.Document;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import javax.annotation.PostConstruct;
+import java.time.Instant;
+import java.util.Arrays;
+
+@Component
+public class ChangeStreamListener {
+
+    @Value("${spring.data.mongodb.uri}")
+    private String mongoUri;
+
+    @Value("${spring.data.mongodb.database}")
+    private String mongoDatabase;
+
+    @Value("${mongo.status.collection}")
+    private String statusCollection;
+
+    @PostConstruct
+    public void init() {
+        MongoClient mongoClient = MongoClients.create(mongoUri);
+        MongoDatabase database = mongoClient.getDatabase(mongoDatabase);
+        MongoCollection<Document> collection = database.getCollection(statusCollection);
+
+        collection.watch(Arrays.asList(
+                Aggregates.match(
+                        Filters.and(
+                                Filters.eq("operationType", OperationType.INSERT.getValue()),
+                                Filters.eq("fullDocument.status", "uploaded")
+                        )
+                )
+        )).forEach((ChangeStreamDocument<Document> change) -> {
+            Document fullDocument = change.getFullDocument();
+            String collectionName = fullDocument.getString("collection");
+            Instant timestamp = fullDocument.getDate("timestamp").toInstant();
+
+            // Start data transfer process
+            transferData(collectionName, timestamp);
+        });
+    }
+
+    private void transferData(String collectionName, Instant timestamp) {
+        // Implement the data transfer logic here
+    }
+}
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.bson.Document;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+public class DataTransferService {
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private static final int BATCH_SIZE = 100;
+
+    public void transferData(String collectionName, Instant timestamp) {
+        // Query MongoDB for new data since the last timestamp
+        List<Document> documents = mongoTemplate.getCollection(collectionName)
+                .find(Filters.gt("timestamp", timestamp))
+                .sort(Sorts.ascending("timestamp"))
+                .limit(BATCH_SIZE)
+                .into(new ArrayList<>());
+
+        if (documents.isEmpty()) {
+            return;
+        }
+
+        // Insert data into PostgreSQL
+        String sql = "INSERT INTO your_table (field1, field2, timestamp) VALUES (?, ?, ?)";
+        List<Object[]> batchArgs = new ArrayList<>();
+        for (Document doc : documents) {
+            batchArgs.add(new Object[]{
+                    doc.getString("field1"),
+                    doc.getInteger("field2"),
+                    doc.getDate("timestamp")
+            });
+        }
+        jdbcTemplate.batchUpdate(sql, batchArgs);
+
+        // Update the status collection to mark as consumed
+        updateStatus(collectionName, documents.get(documents.size() - 1).getDate("timestamp").toInstant());
+    }
+
+    private void updateStatus(String collectionName, Instant timestamp) {
+        Document query = new Document("collection", collectionName)
+                .append("status", "uploaded");
+        Document update = new Document("$set", new Document("status", "consumed"));
+        mongoTemplate.getCollection("status_collection").updateOne(query, update);
+    }
+}
+To handle the scenario where the transfer process can start from the beginning if it errors out in the middle, we need to add logic to track the progress of the batch transfer and ensure that incomplete batches are retried. Here's how you can achieve this:
+
+Add a transfer_status field in the status_collection to track the progress of the data transfer (e.g., in_progress, completed).
+
+Store the last successfully transferred timestamp in a separate table or collection so that the transfer process can resume from where it left off in case of an error.
+
+Updated Java Application with Robust Error Handling
+Here's the updated Java code with additional logic to handle failures and resume from the last successful point.
+
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Aggregates;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.changestream.ChangeStreamDocument;
+import com.mongodb.client.model.changestream.OperationType;
+import org.bson.Document;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import javax.annotation.PostConstruct;
+import java.time.Instant;
+import java.util.Arrays;
+
+@Component
+public class ChangeStreamListener {
+
+    @Value("${spring.data.mongodb.uri}")
+    private String mongoUri;
+
+    @Value("${spring.data.mongodb.database}")
+    private String mongoDatabase;
+
+    @Value("${mongo.status.collection}")
+    private String statusCollection;
+
+    @Autowired
+    private DataTransferService dataTransferService;
+
+    @PostConstruct
+    public void init() {
+        MongoClient mongoClient = MongoClients.create(mongoUri);
+        MongoDatabase database = mongoClient.getDatabase(mongoDatabase);
+        MongoCollection<Document> collection = database.getCollection(statusCollection);
+
+        collection.watch(Arrays.asList(
+                Aggregates.match(
+                        Filters.and(
+                                Filters.eq("operationType", OperationType.INSERT.getValue()),
+                                Filters.eq("fullDocument.status", "uploaded")
+                        )
+                )
+        )).forEach((ChangeStreamDocument<Document> change) -> {
+            Document fullDocument = change.getFullDocument();
+            String collectionName = fullDocument.getString("collection");
+            Instant timestamp = fullDocument.getDate("timestamp").toInstant();
+
+            // Start data transfer process
+            dataTransferService.transferData(collectionName, timestamp);
+        });
+    }
+}
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.bson.Document;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Sorts;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+public class DataTransferService {
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private static final int BATCH_SIZE = 100;
+
+    public void transferData(String collectionName, Instant timestamp) {
+        try {
+            // Query MongoDB for new data since the last timestamp
+            List<Document> documents = mongoTemplate.getCollection(collectionName)
+                    .find(Filters.gt("timestamp", timestamp))
+                    .sort(Sorts.ascending("timestamp"))
+                    .limit(BATCH_SIZE)
+                    .into(new ArrayList<>());
+
+            if (documents.isEmpty()) {
+                updateStatus(collectionName, "completed");
+                return;
+            }
+
+            // Insert data into PostgreSQL
+            String sql = "INSERT INTO your_table (field1, field2, timestamp) VALUES (?, ?, ?)";
+            List<Object[]> batchArgs = new ArrayList<>();
+            for (Document doc : documents) {
+                batchArgs.add(new Object[]{
+                        doc.getString("field1"),
+                        doc.getInteger("field2"),
+                        doc.getDate("timestamp")
+                });
+            }
+            jdbcTemplate.batchUpdate(sql, batchArgs);
+
+            // Update the last successful timestamp in a separate collection/table
+            Instant lastTimestamp = documents.get(documents.size() - 1).getDate("timestamp").toInstant();
+            updateLastSuccessfulTimestamp(collectionName, lastTimestamp);
+
+            // Update the status collection to mark as in progress
+            updateStatus(collectionName, "in_progress");
+
+            // Recursive call to handle the next batch
+            transferData(collectionName, lastTimestamp);
+        } catch (Exception e) {
+            e.printStackTrace();
+            // Handle exception (logging, retry mechanism, etc.)
+            // If desired, update status to indicate an error
+            updateStatus(collectionName, "error");
+        }
+    }
+
+    private void updateStatus(String collectionName, String status) {
+        Document query = new Document("collection", collectionName);
+        Document update = new Document("$set", new Document("status", status));
+        mongoTemplate.getCollection("status_collection").updateOne(query, update);
+    }
+
+    private void updateLastSuccessfulTimestamp(String collectionName, Instant timestamp) {
+        Document query = new Document("collection", collectionName);
+        Document update = new Document("$set", new Document("last_successful_timestamp", timestamp));
+        mongoTemplate.getCollection("last_successful_timestamps").updateOne(query, update);
+    }
+
+    public Instant getLastSuccessfulTimestamp(String collectionName) {
+        Document doc = mongoTemplate.getCollection("last_successful_timestamps")
+                .find(new Document("collection", collectionName)).first();
+        if (doc != null && doc.containsKey("last_successful_timestamp")) {
+            return doc.getDate("last_successful_timestamp").toInstant();
+        }
+        return Instant.EPOCH; // Default to epoch if no timestamp found
+    }
+}
+Starting Transfer from Last Successful Timestamp
+Modify the transferData method to start from the last successful timestamp in case of an error.
+
+ChangeStreamListener.java (continued)
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.bson.Document;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Sorts;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+public class DataTransferService {
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private static final int BATCH_SIZE = 100;
+
+    public void transferData(String collectionName, Instant timestamp) {
+        try {
+            // Fetch the last successful timestamp
+            Instant lastSuccessfulTimestamp = getLastSuccessfulTimestamp(collectionName);
+
+            // Query MongoDB for new data since the last successful timestamp
+            List<Document> documents = mongoTemplate.getCollection(collectionName)
+                    .find(Filters.gt("timestamp", lastSuccessfulTimestamp))
+                    .sort(Sorts.ascending("timestamp"))
+                    .limit(BATCH_SIZE)
+                    .into(new ArrayList<>());
+
+            if (documents.isEmpty()) {
+                updateStatus(collectionName, "completed");
+                return;
+            }
+
+            // Insert data into PostgreSQL
+            String sql = "INSERT INTO your_table (field1, field2, timestamp) VALUES (?, ?, ?)";
+            List<Object[]> batchArgs = new ArrayList<>();
+            for (Document doc : documents) {
+                batchArgs.add(new Object[]{
+                        doc.getString("field1"),
+                        doc.getInteger("field2"),
+                        doc.getDate("timestamp")
+                });
+            }
+            jdbcTemplate.batchUpdate(sql, batchArgs);
+
+            // Update the last successful timestamp in a separate collection/table
+            Instant lastTimestamp = documents.get(documents.size() - 1).getDate("timestamp").toInstant();
+            updateLastSuccessfulTimestamp(collectionName, lastTimestamp);
+
+            // Update the status collection to mark as in progress
+            updateStatus(collectionName, "in_progress");
+
+            // Recursive call to handle the next batch
+            transferData(collectionName, lastTimestamp);
+        } catch (Exception e) {
+            e.printStackTrace();
+            // Handle exception (logging, retry mechanism, etc.)
+            // If desired, update status to indicate an error
+            updateStatus(collectionName, "error");
+        }
+    }
+
+    private void updateStatus(String collectionName, String status) {
+        Document query = new Document("collection", collectionName);
+        Document update = new Document("$set", new Document("status", status));
+        mongoTemplate.getCollection("status_collection").updateOne(query, update);
+    }
+
+    private void updateLastSuccessfulTimestamp(String collectionName, Instant timestamp) {
+        Document query = new Document("collection", collectionName);
+        Document update = new Document("$set", new Document("last_successful_timestamp", timestamp));
+        mongoTemplate.getCollection("last_successful_timestamps").updateOne(query, update);
+    }
+
+    public Instant getLastSuccessfulTimestamp(String collectionName) {
+        Document doc = mongoTemplate.getCollection("last_successful_timestamps")
+                .find(new Document("collection", collectionName)).first();
+        if (doc != null && doc.containsKey("last_successful_timestamp")) {
+            return doc.getDate("last_successful_timestamp").toInstant();
+        }
+        return Instant.EPOCH; // Default to epoch if no timestamp found
+    }
+}
+
+
+
+To ensure that the Java application can handle new uploads while it's in the middle of processing existing data, we need to introduce a queuing mechanism. This mechanism will allow the Java process to keep track of multiple upload events and process them in sequence, ensuring that no data is missed and that all uploads are handled properly.
+
+### Solution Outline
+
+1. **Queue Implementation**: Use a thread-safe queue to manage upload events.
+2. **Change Stream Listener**: Add new events to the queue.
+3. **Worker Thread**: A dedicated worker thread or threads that will process the queue and handle data transfers to PostgreSQL.
+4. **Status Management**: Ensure the status updates reflect the current state accurately.
+
+### Detailed Implementation
+
+#### 1. Queue Implementation
+
+We'll use a `BlockingQueue` to handle events in a thread-safe manner.
+
+#### 2. Change Stream Listener
+
+The change stream listener will add new events to the queue when a new upload is detected.
+
+#### 3. Worker Thread
+
+The worker thread will process events from the queue. If it detects an ongoing process, it will wait until the current processing is finished before starting a new one.
+
+### Java Code
+
+Here's how you can implement this:
+
+#### ChangeStreamListener.java
+
+```java
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Aggregates;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.changestream.ChangeStreamDocument;
+import com.mongodb.client.model.changestream.OperationType;
+import org.bson.Document;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import javax.annotation.PostConstruct;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+
+@Component
+public class ChangeStreamListener {
+
+    @Value("${spring.data.mongodb.uri}")
+    private String mongoUri;
+
+    @Value("${spring.data.mongodb.database}")
+    private String mongoDatabase;
+
+    @Value("${mongo.status.collection}")
+    private String statusCollection;
+
+    private final BlockingQueue<ChangeStreamEvent> queue = new LinkedBlockingQueue<>();
+
+    @PostConstruct
+    public void init() {
+        MongoClient mongoClient = MongoClients.create(mongoUri);
+        MongoDatabase database = mongoClient.getDatabase(mongoDatabase);
+        MongoCollection<Document> collection = database.getCollection(statusCollection);
+
+        collection.watch(Arrays.asList(
+                Aggregates.match(
+                        Filters.and(
+                                Filters.eq("operationType", OperationType.INSERT.getValue()),
+                                Filters.eq("fullDocument.status", "uploaded")
+                        )
+                )
+        )).forEach((ChangeStreamDocument<Document> change) -> {
+            Document fullDocument = change.getFullDocument();
+            String collectionName = fullDocument.getString("collection");
+            Instant timestamp = fullDocument.getDate("timestamp").toInstant();
+            queue.add(new ChangeStreamEvent(collectionName, timestamp));
+        });
+
+        // Start the worker thread
+        new Thread(new DataTransferWorker(queue)).start();
+    }
+
+    private static class ChangeStreamEvent {
+        private final String collectionName;
+        private final Instant timestamp;
+
+        public ChangeStreamEvent(String collectionName, Instant timestamp) {
+            this.collectionName = collectionName;
+            this.timestamp = timestamp;
+        }
+
+        public String getCollectionName() {
+            return collectionName;
+        }
+
+        public Instant getTimestamp() {
+            return timestamp;
+        }
+    }
+}
+```
+
+#### DataTransferWorker.java
+
+```java
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import java.time.Instant;
+import java.util.concurrent.BlockingQueue;
+
+@Component
+public class DataTransferWorker implements Runnable {
+
+    private final BlockingQueue<ChangeStreamListener.ChangeStreamEvent> queue;
+
+    @Autowired
+    private DataTransferService dataTransferService;
+
+    public DataTransferWorker(BlockingQueue<ChangeStreamListener.ChangeStreamEvent> queue) {
+        this.queue = queue;
+    }
+
+    @Override
+    public void run() {
+        while (true) {
+            try {
+                ChangeStreamListener.ChangeStreamEvent event = queue.take();
+                processEvent(event);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
+
+    private void processEvent(ChangeStreamListener.ChangeStreamEvent event) {
+        String collectionName = event.getCollectionName();
+        Instant timestamp = event.getTimestamp();
+
+        try {
+            dataTransferService.transferData(collectionName, timestamp);
+        } catch (Exception e) {
+            e.printStackTrace();
+            // Re-add the event to the queue for retry
+            queue.add(event);
+        }
+    }
+}
+```
+
+#### DataTransferService.java
+
+```java
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.bson.Document;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Sorts;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+public class DataTransferService {
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private static final int BATCH_SIZE = 100;
+
+    public synchronized void transferData(String collectionName, Instant timestamp) {
+        try {
+            // Fetch the last successful timestamp
+            Instant lastSuccessfulTimestamp = getLastSuccessfulTimestamp(collectionName);
+
+            // Query MongoDB for new data since the last successful timestamp
+            List<Document> documents = mongoTemplate.getCollection(collectionName)
+                    .find(Filters.gt("timestamp", lastSuccessfulTimestamp))
+                    .sort(Sorts.ascending("timestamp"))
+                    .limit(BATCH_SIZE)
+                    .into(new ArrayList<>());
+
+            if (documents.isEmpty()) {
+                updateStatus(collectionName, "completed");
+                return;
+            }
+
+            // Insert data into PostgreSQL
+            String sql = "INSERT INTO your_table (field1, field2, timestamp) VALUES (?, ?, ?)";
+            List<Object[]> batchArgs = new ArrayList<>();
+            for (Document doc : documents) {
+                batchArgs.add(new Object[]{
+                        doc.getString("field1"),
+                        doc.getInteger("field2"),
+                        doc.getDate("timestamp")
+                });
+            }
+            jdbcTemplate.batchUpdate(sql, batchArgs);
+
+            // Update the last successful timestamp in a separate collection/table
+            Instant lastTimestamp = documents.get(documents.size() - 1).getDate("timestamp").toInstant();
+            updateLastSuccessfulTimestamp(collectionName, lastTimestamp);
+
+            // Update the status collection to mark as in progress
+            updateStatus(collectionName, "in_progress");
+
+            // Recursive call to handle the next batch
+            transferData(collectionName, lastTimestamp);
+        } catch (Exception e) {
+            e.printStackTrace();
+            // Handle exception (logging, retry mechanism, etc.)
+            // If desired, update status to indicate an error
+            updateStatus(collectionName, "error");
+        }
+    }
+
+    private void updateStatus(String collectionName, String status) {
+        Document query = new Document("collection", collectionName);
+        Document update = new Document("$set", new Document("status", status));
+        mongoTemplate.getCollection("status_collection").updateOne(query, update);
+    }
+
+    private void updateLastSuccessfulTimestamp(String collectionName, Instant timestamp) {
+        Document query = new Document("collection", collectionName);
+        Document update = new Document("$set", new Document("last_successful_timestamp", timestamp));
+        mongoTemplate.getCollection("last_successful_timestamps").updateOne(query, update);
+    }
+
+    public Instant getLastSuccessfulTimestamp(String collectionName) {
+        Document doc = mongoTemplate.getCollection("last_successful_timestamps")
+                .find(new Document("collection", collectionName)).first();
+        if (doc != null && doc.containsKey("last_successful_timestamp")) {
+            return doc.getDate("last_successful_timestamp").toInstant();
+        }
+        return Instant.EPOCH; // Default to epoch if no timestamp found
+    }
+}
+```
+
+### Summary
+
+1. **Queue Implementation**: A `BlockingQueue` is used to manage upload events in a thread-safe manner.
+2. **Change Stream Listener**: Adds new events to the queue when a new upload is detected.
+3. **Worker Thread**: Processes events from the queue sequentially. If it detects an ongoing process, it waits until the current processing is finished before starting a new one.
+4. **Status Management**: Updates the status to reflect the current state accurately, including error handling and retry mechanisms.
+
+This setup ensures that the Java application can handle new uploads while processing existing data and can queue requests for loading without missing any data.
+
+
+
+
+
+
+Here is the flow diagram and technical write-up illustrating the entire process of handling data uploads from Hive to MongoDB, and then transferring data from MongoDB to PostgreSQL using Java with robust error handling and queuing mechanisms.
+
+### Flow Diagram
+
+```mermaid
+graph TD;
+    A[Start] --> B[Python Script: Uploads data from Hive to MongoDB]
+    B --> C[MongoDB: Insert data into data_collection]
+    C --> D[Python Script: Update status collection with "uploaded" status]
+    D --> E[Java Application: Monitor Change Stream on status collection]
+    E --> F[Change Stream Listener: Add new events to the queue]
+    F --> G[Worker Thread: Process queue and transfer data to PostgreSQL]
+    G --> H[Data Transfer Service: Fetch last successful timestamp]
+    H --> I[Data Transfer Service: Query new data from MongoDB since last timestamp]
+    I --> J[Data Transfer Service: Insert data into PostgreSQL in batches]
+    J --> K[Data Transfer Service: Update last successful timestamp]
+    K --> L[Data Transfer Service: Update status collection to "in_progress" or "completed"]
+    L --> M[Check for new events in queue]
+    M -- No new events --> N[End]
+    M -- New event --> G
+```
+
+### Technical Write-Up
+
+#### 1. **Python Script**
+
+- **Function**: Uploads data from Hive to MongoDB and updates the status collection.
+- **Steps**:
+  - Reads data from Hive.
+  - Inserts data into the `data_collection` in MongoDB.
+  - Updates the `status_collection` with `collection: data_collection`, `status: uploaded`, and `timestamp: current UTC timestamp`.
+
+#### 2. **Java Application**
+
+- **Function**: Monitors the status collection for new upload events and transfers data from MongoDB to PostgreSQL.
+- **Components**:
+  - **ChangeStreamListener**: Monitors the status collection for new uploads and adds events to a queue.
+  - **DataTransferWorker**: Processes events from the queue and handles data transfer to PostgreSQL.
+  - **DataTransferService**: Performs the actual data transfer and updates status.
+
+#### 3. **ChangeStreamListener.java**
+
+- **Function**: Listens for change events in the status collection.
+- **Steps**:
+  - Connects to MongoDB and sets up a change stream on the `status_collection`.
+  - Filters for `uploaded` status.
+  - Adds new events to the `BlockingQueue`.
+  - Starts the worker thread to process the queue.
+
+#### 4. **DataTransferWorker.java**
+
+- **Function**: Processes events from the queue sequentially.
+- **Steps**:
+  - Takes events from the queue.
+  - Calls `DataTransferService` to handle data transfer.
+  - Retries in case of errors.
+
+#### 5. **DataTransferService.java**
+
+- **Function**: Transfers data from MongoDB to PostgreSQL.
+- **Steps**:
+  - Fetches the last successful timestamp.
+  - Queries MongoDB for new data since the last timestamp.
+  - Inserts data into PostgreSQL in batches.
+  - Updates the last successful timestamp.
+  - Updates the status collection to `in_progress` or `completed`.
+  - Ensures data transfer can resume from the last successful point in case of errors.
+
+### Detailed Components
+
+#### Python Script (Pseudocode)
+
+```python
+from pymongo import MongoClient
+from datetime import datetime
+import pytz
+
+# Connect to MongoDB
+client = MongoClient('mongodb://localhost:27017/')
+db = client['your_database']
+collection = db['data_collection']
+status_collection = db['status_collection']
+
+# Upload data to MongoDB
+data = read_data_from_hive()
+collection.insert_many(data)
+
+# Update status collection
+status_document = {
+    'collection': 'data_collection',
+    'status': 'uploaded',
+    'timestamp': datetime.now(pytz.utc)
+}
+status_collection.insert_one(status_document)
+```
+
+#### Java Code
+
+**ChangeStreamListener.java**
+
+```java
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Aggregates;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.changestream.ChangeStreamDocument;
+import com.mongodb.client.model.changestream.OperationType;
+import org.bson.Document;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import javax.annotation.PostConstruct;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+
+@Component
+public class ChangeStreamListener {
+
+    @Value("${spring.data.mongodb.uri}")
+    private String mongoUri;
+
+    @Value("${spring.data.mongodb.database}")
+    private String mongoDatabase;
+
+    @Value("${mongo.status.collection}")
+    private String statusCollection;
+
+    private final BlockingQueue<ChangeStreamEvent> queue = new LinkedBlockingQueue<>();
+
+    @PostConstruct
+    public void init() {
+        MongoClient mongoClient = MongoClients.create(mongoUri);
+        MongoDatabase database = mongoClient.getDatabase(mongoDatabase);
+        MongoCollection<Document> collection = database.getCollection(statusCollection);
+
+        collection.watch(Arrays.asList(
+                Aggregates.match(
+                        Filters.and(
+                                Filters.eq("operationType", OperationType.INSERT.getValue()),
+                                Filters.eq("fullDocument.status", "uploaded")
+                        )
+                )
+        )).forEach((ChangeStreamDocument<Document> change) -> {
+            Document fullDocument = change.getFullDocument();
+            String collectionName = fullDocument.getString("collection");
+            Instant timestamp = fullDocument.getDate("timestamp").toInstant();
+            queue.add(new ChangeStreamEvent(collectionName, timestamp));
+        });
+
+        // Start the worker thread
+        new Thread(new DataTransferWorker(queue)).start();
+    }
+
+    private static class ChangeStreamEvent {
+        private final String collectionName;
+        private final Instant timestamp;
+
+        public ChangeStreamEvent(String collectionName, Instant timestamp) {
+            this.collectionName = collectionName;
+            this.timestamp = timestamp;
+        }
+
+        public String getCollectionName() {
+            return collectionName;
+        }
+
+        public Instant getTimestamp() {
+            return timestamp;
+        }
+    }
+}
+```
+
+**DataTransferWorker.java**
+
+```java
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import java.time.Instant;
+import java.util.concurrent.BlockingQueue;
+
+@Component
+public class DataTransferWorker implements Runnable {
+
+    private final BlockingQueue<ChangeStreamListener.ChangeStreamEvent> queue;
+
+    @Autowired
+    private DataTransferService dataTransferService;
+
+    public DataTransferWorker(BlockingQueue<ChangeStreamListener.ChangeStreamEvent> queue) {
+        this.queue = queue;
+    }
+
+    @Override
+    public void run() {
+        while (true) {
+            try {
+                ChangeStreamListener.ChangeStreamEvent event = queue.take();
+                processEvent(event);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
+
+    private void processEvent(ChangeStreamListener.ChangeStreamEvent event) {
+        String collectionName = event.getCollectionName();
+        Instant timestamp = event.getTimestamp();
+
+        try {
+            dataTransferService.transferData(collectionName, timestamp);
+        } catch (Exception e) {
+            e.printStackTrace();
+            // Re-add the event to the queue for retry
+            queue.add(event);
+        }
+    }
+}
+```
+
+**DataTransferService.java**
+
+```java
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.bson.Document;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Sorts;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+public class DataTransferService {
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private static final int BATCH_SIZE = 100;
+
+    public synchronized void transferData(String collectionName, Instant timestamp) {
+        try {
+            // Fetch the last successful timestamp
+            Instant lastSuccessfulTimestamp = getLastSuccessfulTimestamp(collectionName);
+
+            // Query MongoDB for new data since the last successful timestamp
+            List<Document> documents = mongoTemplate.getCollection(collectionName)
+                    .find(Filters.gt("timestamp", lastSuccessfulTimestamp))
+                    .sort(Sorts.ascending("timestamp"))
+                    .limit(BATCH_SIZE)
+                    .into(new ArrayList<>());
+
+            if (documents.isEmpty()) {
+                updateStatus(collectionName, "completed");
+                return;
+            }
+
+            // Insert data into PostgreSQL
+            String sql = "INSERT INTO your_table (field1, field2, timestamp) VALUES (?, ?, ?)";
+            List<Object[]> batchArgs = new ArrayList<>();
+            for (Document doc : documents) {
+                batchArgs.add(new Object[]{
+                        doc.getString("field1"),
+                        doc.getInteger("field2"),
+                        doc.getDate("timestamp")
+                });
+            }
+            jdbcTemplate.batchUpdate(sql, batchArgs);
+
+            // Update the last successful timestamp in a separate collection/table
+            Instant lastTimestamp = documents.get(documents.size() - 1).getDate("timestamp").toInstant();
+            updateLastSuccessfulTimestamp(collectionName, lastTimestamp);
+
+            // Update the status collection to mark as in progress
+            updateStatus(collectionName, "in_progress");
+
+            // Recursive call to handle the next batch
+            transferData(collectionName, lastTimestamp);
+        } catch (Exception e) {
+            e.printStackTrace();
+            // Handle exception (logging, retry mechanism, etc.)
+            // If desired, update status to indicate an error
+            updateStatus(collectionName, "error");
+        }
+    }
+
+    private void updateStatus(String collectionName, String status) {
+        Document query = new Document("collection", collectionName);
+        Document
+
+ update = new Document("$set", new Document("status", status));
+        mongoTemplate.getCollection("status_collection").updateOne(query, update);
+    }
+
+    private void updateLastSuccessfulTimestamp(String collectionName, Instant timestamp) {
+        Document query = new Document("collection", collectionName);
+        Document update = new Document("$set", new Document("last_successful_timestamp", timestamp));
+        mongoTemplate.getCollection("last_successful_timestamps").updateOne(query, update);
+    }
+
+    public Instant getLastSuccessfulTimestamp(String collectionName) {
+        Document doc = mongoTemplate.getCollection("last_successful_timestamps")
+                .find(new Document("collection", collectionName)).first();
+        if (doc != null && doc.containsKey("last_successful_timestamp")) {
+            return doc.getDate("last_successful_timestamp").toInstant();
+        }
+        return Instant.EPOCH; // Default to epoch if no timestamp found
+    }
+}
