@@ -1032,3 +1032,32 @@ public class DataTransferService {
         return Instant.EPOCH; // Default to epoch if no timestamp found
     }
 }
+
+
+#!/bin/bash
+
+# Replace these variables with your actual paths and password
+OLD_CERTS_PATH="<path/to/old/cacerts>"
+NEW_CERTS_PATH="<path/to/new/cacerts>"
+PASSWORD="<password_for_new_cacerts>"
+
+# Approach 1: Automatic Import (Less Secure)
+# -----------------------------------------------
+# List all certificates from the old cacerts
+old_certs=$(keytool -list -keystore "$OLD_CERTS_PATH" | grep -A1 'alias name:')
+
+# Loop through each certificate and import with the same alias
+for alias in $old_certs; do
+    keytool -importcert -keystore "$NEW_CERTS_PATH" -storepass "$PASSWORD" -noprompt -alias "$alias" -file "$OLD_CERTS_PATH"
+done
+
+# Approach 2: Manual Review and Import (More Secure)
+# -----------------------------------------------
+# List all certificates with aliases from the old cacerts
+keytool -list -keystore "$OLD_CERTS_PATH"
+
+# Manually review the listed certificates and their information
+# Use separate `keytool -importcert` commands for each certificate you want to import
+# into the new cacerts, specifying the desired alias (if different from the old one).
+
+echo "** Please review the listed certificates (Approach 2) or import completed (Approach 1). **"
