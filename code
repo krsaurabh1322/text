@@ -1108,3 +1108,10 @@ public class PersistenceModule extends AbstractModule {
     }
 }
 
+
+
+SessionFactory sessionFactory = entityManager.unwrap(SessionFactory.class);
+sessionFactory.getStatistics().setStatisticsEnabled(true);
+SessionStatistics statistics = sessionFactory.getStatistics();
+long updateCount = statistics.getEntityStatistics(YourEntity.class).getUpdates();
+System.out.println("Number of updates performed: " + updateCount);
