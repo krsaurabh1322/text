@@ -1060,4 +1060,51 @@ keytool -list -keystore "$OLD_CERTS_PATH"
 # Use separate `keytool -importcert` commands for each certificate you want to import
 # into the new cacerts, specifying the desired alias (if different from the old one).
 
-echo "** Please review the listed certificates (Approach 2) or import completed (Approach 1). **"
+echo "** Please review the listed certificates (Approach 2) or import completed (Approach 1). 
+
+
+
+
+
+
+
+public class TransactionalInterceptor implements MethodInterceptor {
+
+    @Inject
+    private EntityManagerFactory entityManagerFactory;
+
+    @Override
+    public Object intercept(Invocation invocation) throws Throwable {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        em.getTransaction().begin();
+        try {
+            Object result = invocation.proceed();
+            em.getTransaction().commit();
+            return result;
+        } catch (Exception e) {
+            em.getTransaction().rollback();
+            throw e;
+        } finally {
+            if (em.isOpen()) {
+                em.close();
+            }
+        }
+    }
+}
+
+
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD)
+public @interface TransactionalGuice {
+}
+
+
+public class PersistenceModule extends AbstractModule {
+
+    @Override
+    protected void configure() {
+        bind(EntityManagerFactory.class).toProvider(YourEntityManagerFactoryProvider.class); // or use Warp-Persist
+        bindInterceptor(Matchers.any(), Matchers.annotatedBy(TransactionalGuice.class), TransactionalInterceptor.class);
+    }
+}
+
