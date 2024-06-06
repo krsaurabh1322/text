@@ -1118,3 +1118,128 @@ System.out.println("Number of updates performed: " + updateCount);
 
 spring.jpa.properties.hibernate.generate_statistics=true
 
+----------------------------
+
+Got it. Let's revise the schema and the workflow accordingly to reflect these status changes:
+
+### Updated `status_collection` Schema
+
+- **_id**: ObjectId (automatically generated unique identifier)
+- **collection**: String (name of the data collection, e.g., "data_collection")
+- **status**: String (status of the data, e.g., "INITIATE", "INPROCESS", "COMPLETED", "FAILED")
+- **timestamp**: Date (UTC timestamp of the upload or processing completion)
+- **details**: String (optional field for error details or additional information, used when status is "FAILED")
+
+Example document:
+
+```json
+{
+  "_id": ObjectId("60c5ba08e1b8a3f9a76b0f1b"),
+  "collection": "data_collection",
+  "status": "INITIATE",
+  "timestamp": ISODate("2024-06-07T10:15:30Z"),
+  "details": "Optional details or error message"
+}
+```
+
+### Status Update Workflow
+
+1. **INITIATE** (Python):
+    - Set when the data upload to MongoDB is successfully completed by the Python script.
+    - Insert a document into `status_collection` with `status` set to "INITIATE".
+
+2. **INPROCESS** (Java):
+    - Set when the Java application starts processing the data.
+    - Update the document in `status_collection` with `status` set to "INPROCESS".
+
+3. **COMPLETED** (Java):
+    - Set when the data transfer to PostgreSQL is successfully completed by the Java application.
+    - Update the document in `status_collection` with `status` set to "COMPLETED".
+
+4. **FAILED** (Java):
+    - Set if there is any failure in the data transfer process.
+    - Update the document in `status_collection` with `status` set to "FAILED".
+    - Optionally, add error details to the `details` field.
+
+### Indexes
+
+To optimize queries and ensure efficient processing, you might want to create indexes on relevant fields.
+
+For `data_collection`:
+
+```javascript
+db.data_collection.createIndex({ "field1": 1 });
+```
+
+For `status_collection`:
+
+```javascript
+db.status_collection.createIndex({ "collection": 1 });
+db.status_collection.createIndex({ "status": 1 });
+db.status_collection.createIndex({ "timestamp": 1 });
+```
+
+### Summary of Steps:
+
+1. **Python Script**:
+    - Reads data from Hive.
+    - Uploads data to `data_collection` in MongoDB.
+    - Inserts a document into `status_collection` with `status` set to "INITIATE" and current timestamp.
+
+2. **Java Application**:
+    - Connects to MongoDB.
+    - Creates a change stream on `status_collection`.
+    - Filters the change stream for documents with status "INITIATE".
+    - Upon receiving a change notification:
+        - Sets the status to "INPROCESS".
+        - Extracts the timestamp.
+        - Retrieves the latest timestamp if needed.
+        - Performs a batch copy operation from `data_collection` to PostgreSQL, filtering based on the timestamp.
+        - Upon successful transfer, sets status to "COMPLETED".
+        - If an error occurs, sets status to "FAILED" with error details.
+
+### Python Script Example
+
+```python
+from datetime import datetime
+from pymongo import MongoClient
+
+# MongoDB connection
+client = MongoClient("mongodb://localhost:27017/")
+db = client.my_database
+
+# Read data from Hive (mock example)
+data_from_hive = [
+    {"field1": "example1", "field2": 123, "field3": "data1", "field4": datetime.utcnow()},
+    {"field1": "example2", "field2": 456, "field3": "data2", "field4": datetime.utcnow()},
+]
+
+# Upload data to MongoDB
+data_collection = db.data_collection
+data_collection.insert_many(data_from_hive)
+
+# Insert status document
+status_collection = db.status_collection
+status_document = {
+    "collection": "data_collection",
+    "status": "INITIATE",
+    "timestamp": datetime.utcnow()
+}
+status_collection.insert_one(status_document)
+
+print("Data uploaded and status INITIATE set.")
+```
+
+### Java Application Outline
+
+1. **Setup MongoDB Change Stream**:
+    - Monitor the `status_collection` for documents with `status` set to "INITIATE".
+
+2. **Process Change Stream Notifications**:
+    - Upon receiving a notification, update the document to `status` "INPROCESS".
+    - Extract the timestamp and perform batch copy operation.
+    - Upon successful transfer, update the status to "COMPLETED".
+    - If an error occurs, update the status to "FAILED" with error details.
+
+This approach ensures that the statuses are clearly tracked and updated at each stage of the process,
+providing a robust mechanism for monitoring and managing the data upload and transfer workflow.
