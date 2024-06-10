@@ -1,3 +1,8 @@
+SELECT rolname AS "Role Name", admin_option
+FROM pg_auth_members
+WHERE member = 'tas_global_admin_role';
+
+
 GRANT ADMIN OPTION ON ROLE tas_ocli_core_rw_role TO "tas global_liquibase admin";
 
 
