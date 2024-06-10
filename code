@@ -1,4 +1,19 @@
 
+
+SELECT
+    pg_roles.rolname AS role,
+    pg_roles2.rolname AS member,
+    pg_auth_members.admin_option
+FROM
+    pg_auth_members
+JOIN
+    pg_roles ON pg_roles.oid = pg_auth_members.roleid
+JOIN
+    pg_roles pg_roles2 ON pg_roles2.oid = pg_auth_members.member
+WHERE
+    pg_roles.rolname = 'tas_ocli_core_rw_role'
+    AND pg_roles2.rolname = 'tas_global_admin_role';
+
 SELECT roleid, member, grantor, admin_option
 FROM pg_auth_members
 JOIN pg_roles r ON (member = r.oid)
