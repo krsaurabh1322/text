@@ -1,3 +1,6 @@
+GRANT ADMIN OPTION ON ROLE tas_ocli_core_rw_role TO "tas global_liquibase admin";
+
+
 REVOKE ADMIN OPTION ON ROLE tas_ocli_core_rw_role FROM "tas global_liquibase admin";
 GRANT tas_ocli_core_rw_role TO tas_ocli_core_rw;
 
