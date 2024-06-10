@@ -1,3 +1,10 @@
+
+SELECT roleid, member, grantor, admin_option
+FROM pg_auth_members
+JOIN pg_roles r ON (member = r.oid)
+WHERE r.rolname = 'tas_global_admin_role';
+
+
 SELECT rolname AS "Role Name", admin_option
 FROM pg_auth_members
 WHERE member = 'tas_global_admin_role';
