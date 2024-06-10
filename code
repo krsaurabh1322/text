@@ -1,3 +1,5 @@
+REVOKE ADMIN OPTION ON ROLE tas_ocli_core_rw_role FROM "tas global_liquibase admin";
+GRANT tas_ocli_core_rw_role TO tas_ocli_core_rw;
 
 Flow Diagram: Data Transfer with Status Tracking and Change Streams
 This flow diagram illustrates the data transfer process with status tracking and change streams:
