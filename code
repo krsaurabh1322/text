@@ -1275,3 +1275,69 @@ print("Data uploaded and status INITIATE set.")
 
 This approach ensures that the statuses are clearly tracked and updated at each stage of the process,
 providing a robust mechanism for monitoring and managing the data upload and transfer workflow.
+
+
+
+
+===========================
+
+
+public class MyModule extends AbstractModule {
+    @Override
+    protected void configure() {
+        bind(new TypeLiteral<MongoDataLoader<BCA>>() {})
+            .toProvider(createLoaderProvider(BCA.class, BCA.REPOSITORY_CONFIG, "bca", "id"))
+            .asEagerSingleton();
+
+        // Add similar bindings for other entities if needed
+    }
+
+    private <T> Provider<MongoDataLoader<T>> createLoaderProvider(Class<T> entityClass, 
+                                                                  RepositoryConfig<String, T> repositoryConfig, 
+                                                                  String tableName, 
+                                                                  String primaryKeyColumn) {
+        return new Provider<MongoDataLoader<T>>() {
+            @Inject
+            private LoggerFactory loggerFactory;
+            @Inject
+            private JdbcTemplate jdbcTemplate;
+            @Inject
+            private ListeningExecutorService executorService;
+            @Inject
+            private MongoRepositoryFactory mongoFactory;
+
+            @Override
+            public MongoDataLoader<T> get() {
+                return new MongoDataLoader<T>(loggerFactory, jdbcTemplate, executorService, mongoFactory) {
+                    @Override
+                    public RepositoryConfig<String, T> getConfig() {
+                        return repositoryConfig;
+                    }
+
+                    @Override
+                    public Class<T> getEntityClass() {
+                        return entityClass;
+                    }
+
+                    @Override
+                    public String getTableName() {
+                        return tableName;
+                    }
+
+                    @Override
+                    public String getPrimaryKeyColumn() {
+                        return primaryKeyColumn;
+                    }
+                };
+            }
+        };
+    }
+}
+
+
+private final MongoDataLoader<BCA> bcaLoader;
+
+@Inject
+public MyService(MongoDataLoader<BCA> bcaLoader) {
+    this.bcaLoader = bcaLoader;
+}
