@@ -1341,3 +1341,56 @@ private final MongoDataLoader<BCA> bcaLoader;
 public MyService(MongoDataLoader<BCA> bcaLoader) {
     this.bcaLoader = bcaLoader;
 }
+
+
+////////////////////////////////////
+
+import org.hibernate.boot.Metadata;
+import org.hibernate.boot.MetadataSources;
+import org.hibernate.boot.registry.StandardServiceRegistry;
+import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
+import org.hibernate.tool.schema.TargetType;
+import org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.util.EnumSet;
+import java.util.List;
+
+@Configuration
+public class SchemaGeneratorConfig {
+
+    public String generateSchema(List<Class<?>> entityClasses) {
+        StandardServiceRegistry standardRegistry = new StandardServiceRegistryBuilder()
+                .applySetting("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect")
+                .build();
+
+        MetadataSources metadataSources = new MetadataSources(standardRegistry);
+        entityClasses.forEach(metadataSources::addAnnotatedClass);
+
+        Metadata metadata = metadataSources.buildMetadata();
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PrintStream out = new PrintStream(baos);
+
+        SchemaManagementToolCoordinator.process(
+                metadata.getEntityBindings(),
+                metadata,
+                standardRegistry,
+                out,
+                TargetType.SCRIPT,
+                EnumSet.of(TargetType.SCRIPT)
+        );
+
+        return new String(baos.toByteArray());
+    }
+}
+
+/////////////////////////////////////
+String combinedSchema = schemaGenerator.generateSchema(Arrays.asList(User.class, AnotherEntity.class));
+System.out.println("Combined Schema:");
+System.out.println(combinedSchema);
+
+//////////////////////////////////////
