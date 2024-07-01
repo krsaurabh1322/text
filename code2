@@ -59,3 +59,60 @@ public class SlicedResultSet implements ResultSet {
         originalResultSet.close();
     }
 }
+
+
+import java.util.*;
+
+public class CachedResultSet implements ResultSet {
+    private final List<Row> cachedRows;
+    private final FieldModel fieldModel;
+    private final int offset;
+    private final int limit;
+    private int currentIndex;
+
+    public CachedResultSet(List<Row> rows, FieldModel fieldModel, int offset, int limit) {
+        this.cachedRows = new ArrayList<>(rows.subList(offset, Math.min(offset + limit, rows.size())));
+        this.fieldModel = fieldModel;
+        this.offset = offset;
+        this.limit = limit;
+        this.currentIndex = 0;
+    }
+
+    @Override
+    public FieldModel metadata() {
+        return this.fieldModel;
+    }
+
+    @Override
+    public int offset() {
+        return this.offset;
+    }
+
+    @Override
+    public int limit() {
+        return this.limit;
+    }
+
+    @Override
+    public int total() {
+        return this.cachedRows.size();
+    }
+
+    @Override
+    public boolean hasNext() {
+        return currentIndex < cachedRows.size();
+    }
+
+    @Override
+    public Row next() {
+        if (!hasNext()) {
+            throw new NoSuchElementException("No more elements in the cached result set");
+        }
+        return cachedRows.get(currentIndex++);
+    }
+
+    @Override
+    public void close() {
+        // Nothing to close for cached result set
+    }
+}
