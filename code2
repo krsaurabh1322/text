@@ -116,3 +116,94 @@ public class CachedResultSet implements ResultSet {
         // Nothing to close for cached result set
     }
 }
+
+
+import java.util.*;
+
+public class ResultSetCache {
+    private final List<Row> cachedRows;
+    private final FieldModel fieldModel;
+
+    public ResultSetCache(ResultSet originalResultSet) {
+        this.cachedRows = new ArrayList<>();
+        this.fieldModel = originalResultSet.metadata();
+        
+        // Cache all rows from the original ResultSet
+        while (originalResultSet.hasNext()) {
+            this.cachedRows.add(originalResultSet.next());
+        }
+    }
+
+    public FieldModel metadata() {
+        return this.fieldModel;
+    }
+
+    public int total() {
+        return cachedRows.size();
+    }
+
+    public ResultSet getRows(int offset, int limit) {
+        int fromIndex = offset;
+        int toIndex = Math.min(offset + limit, cachedRows.size());
+        return new SlicedResultSet(cachedRows.subList(fromIndex, toIndex), fieldModel, offset, limit);
+    }
+}
+
+
+
+import java.util.*;
+
+public class SlicedResultSet implements ResultSet {
+    private final List<Row> slicedRows;
+    private final FieldModel fieldModel;
+    private final int offset;
+    private final int limit;
+    private int currentIndex;
+
+    public SlicedResultSet(List<Row> slicedRows, FieldModel fieldModel, int offset, int limit) {
+        this.slicedRows = slicedRows;
+        this.fieldModel = fieldModel;
+        this.offset = offset;
+        this.limit = limit;
+        this.currentIndex = 0;
+    }
+
+    @Override
+    public FieldModel metadata() {
+        return this.fieldModel;
+    }
+
+    @Override
+    public int offset() {
+        return this.offset;
+    }
+
+    @Override
+    public int limit() {
+        return this.limit;
+    }
+
+    @Override
+    public int total() {
+        return this.slicedRows.size();
+    }
+
+    @Override
+    public boolean hasNext() {
+        return currentIndex < slicedRows.size();
+    }
+
+    @Override
+    public Row next() {
+        if (!hasNext()) {
+            throw new NoSuchElementException("No more elements in the sliced result set");
+        }
+        return slicedRows.get(currentIndex++);
+    }
+
+    @Override
+    public void close() {
+        // Nothing to close for sliced result set
+    }
+}
+
