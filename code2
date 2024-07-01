@@ -1,0 +1,61 @@
+import java.util.NoSuchElementException;
+
+public class SlicedResultSet implements ResultSet {
+    private final JdbcResultSet originalResultSet;
+    private final int offset;
+    private final int limit;
+    private int currentRow;
+
+    public SlicedResultSet(JdbcResultSet originalResultSet, int offset, int limit) {
+        this.originalResultSet = originalResultSet;
+        this.offset = offset;
+        this.limit = limit;
+        this.currentRow = 0;
+
+        try {
+            // Move the original result set to the starting offset
+            this.originalResultSet.rs.absolute(offset);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to move to offset: " + offset, e);
+        }
+    }
+
+    @Override
+    public FieldModel metadata() {
+        return originalResultSet.metadata();
+    }
+
+    @Override
+    public int offset() {
+        return this.offset;
+    }
+
+    @Override
+    public int limit() {
+        return this.limit;
+    }
+
+    @Override
+    public int total() {
+        return Math.min(this.limit, originalResultSet.total() - this.offset);
+    }
+
+    @Override
+    public boolean hasNext() {
+        return currentRow < limit && originalResultSet.hasNext();
+    }
+
+    @Override
+    public Row next() {
+        if (!hasNext()) {
+            throw new NoSuchElementException("No more elements in the sliced result set");
+        }
+        currentRow++;
+        return originalResultSet.next();
+    }
+
+    @Override
+    public void close() {
+        originalResultSet.close();
+    }
+}
