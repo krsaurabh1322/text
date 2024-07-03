@@ -223,3 +223,15 @@ List<TransferList.ListItem> getDimensions() {
         .collect(Collectors.toList());
 }
 
+
+final List<String> selectedDimensions = 
+    ((TransferList.Lists) dimensionsList.props().get("1"))
+        .getRight().stream()
+        .map(nestedItem -> (TransferList.NestedListItem) nestedItem.getValue())
+        .filter(Objects::nonNull)
+        .flatMap(nestedListItem -> nestedListItem.getValue().stream()
+            .map(stringItem -> (TransferList.StringListItem) stringItem.getValue())
+            .filter(Objects::nonNull)
+            .map(TransferList.StringListItem::getValue))
+        .collect(Collectors.toList());
+
