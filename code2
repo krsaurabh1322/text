@@ -207,3 +207,19 @@ public class SlicedResultSet implements ResultSet {
     }
 }
 
+
+List<TransferList.ListItem> getDimensions() {
+    return propertyParser.getTablesMap().values().stream()
+        .filter(table -> table.getDimensions() != null)
+        .map(table -> {
+            // Create a list of ListItem objects from the dimensions
+            List<TransferList.ListItem> dimensionsList = createAliasMap(table.getName(), table.getDimensions(), table.getAlias()).entrySet().stream()
+                .map(entry -> TransferList.ListItem.builder().label(entry.getKey()).value(entry.getValue()).build())
+                .collect(Collectors.toList());
+            
+            // Create a ListItem with the table name as the label and the dimensions list as the value
+            return TransferList.ListItem.builder().label(table.getName()).value(dimensionsList).build();
+        })
+        .collect(Collectors.toList());
+}
+
