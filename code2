@@ -287,3 +287,24 @@ public class EmptyResultSetTest {
         assertNull(emptyResultSet.next());
     }
 }
+
+
+import static org.junit.Assert.*;
+
+import org.junit.Test;
+
+public class ConstantsTest {
+
+    @Test
+    public void testConstants() {
+        // Assuming Path.make concatenates its arguments with a slash
+        String expectedPrefix = Path.make(SelfServiceApp.APP_NAME);
+        String expectedPubsubPrefix = Path.make(expectedPrefix, "pubsub");
+
+        assertEquals(expectedPubsubPrefix, Constants.PUBSUB_PREFIX);
+        assertEquals(Path.make(expectedPubsubPrefix, "submit"), Constants.EVENT_QUERY_SUBMIT);
+        assertEquals(Path.make(expectedPubsubPrefix, "reset"), Constants.EVENT_QUERY_RESET);
+        assertEquals(Path.make(expectedPubsubPrefix, "status"), Constants.EVENT_QUERY_STATUS);
+        assertEquals("ss_report.data", Constants.DATA_STREAM_NAME);
+    }
+}
