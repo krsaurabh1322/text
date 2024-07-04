@@ -235,3 +235,55 @@ final List<String> selectedDimensions =
             .map(TransferList.StringListItem::getValue))
         .collect(Collectors.toList());
 
+
+
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+public class EmptyResultSetTest {
+
+    private EmptyResultSet emptyResultSet;
+
+    @BeforeEach
+    public void setUp() {
+        emptyResultSet = new EmptyResultSet();
+    }
+
+    @Test
+    public void testMetadata() {
+        assertNotNull(emptyResultSet.metadata());
+    }
+
+    @Test
+    public void testOffset() {
+        assertEquals(0, emptyResultSet.offset());
+    }
+
+    @Test
+    public void testLimit() {
+        assertEquals(0, emptyResultSet.limit());
+    }
+
+    @Test
+    public void testTotal() {
+        assertEquals(0, emptyResultSet.total());
+    }
+
+    @Test
+    public void testClose() {
+        assertDoesNotThrow(() -> emptyResultSet.close());
+    }
+
+    @Test
+    public void testHasNext() {
+        assertFalse(emptyResultSet.hasNext());
+    }
+
+    @Test
+    public void testNext() {
+        assertNull(emptyResultSet.next());
+    }
+}
