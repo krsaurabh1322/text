@@ -195,3 +195,41 @@ public class Main {
 }
 
 
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import org.junit.jupiter.api.Test;
+
+public class DecimalTypeTest {
+
+    @Test
+    public void testIsDecimalType_Double() {
+        assertTrue(DecimalType.isDecimalType("double"));
+    }
+
+    @Test
+    public void testIsDecimalType_Float() {
+        assertTrue(DecimalType.isDecimalType("float"));
+    }
+
+    @Test
+    public void testIsDecimalType_BigDecimal() {
+        assertTrue(DecimalType.isDecimalType("bigdecimal"));
+    }
+
+    @Test
+    public void testIsDecimalType_InvalidType() {
+        assertFalse(DecimalType.isDecimalType("int"));
+    }
+
+    @Test
+    public void testIsDecimalType_EmptyString() {
+        assertFalse(DecimalType.isDecimalType(""));
+    }
+
+    @Test
+    public void testIsDecimalType_Null() {
+        assertFalse(DecimalType.isDecimalType(null));
+    }
+}
+
