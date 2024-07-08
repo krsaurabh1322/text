@@ -1,0 +1,197 @@
+import java.sql.ResultSet;
+
+public interface QueryClient {
+    ResultSet resultof();
+    ResultSet resultofRange(int offset, int limit);
+    int total();
+}
+
+
+import java.sql.ResultSet;
+
+public class QueryClientImpl implements QueryClient {
+    private final ResultSetService resultSetService;
+    private final String queryId;
+
+    public QueryClientImpl(ResultSetService resultSetService, QueryConfig queryConfig) {
+        this.resultSetService = resultSetService;
+        this.queryId = resultSetService.executeQuery(queryConfig);
+        if (this.queryId == null) {
+            throw new IllegalStateException("Failed to execute query and initialize client.");
+        }
+    }
+
+    @Override
+    public ResultSet resultof() {
+        return resultSetService.resultof(queryId);
+    }
+
+    @Override
+    public ResultSet resultofRange(int offset, int limit) {
+        return resultSetService.resultofRange(queryId, offset, limit);
+    }
+
+    @Override
+    public int total() {
+        return resultSetService.total(queryId);
+    }
+}
+
+
+
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
+
+import java.sql.ResultSet;
+import java.util.concurrent.TimeUnit;
+
+public class ResultSetService {
+    private final LoadingCache<String, ResultSet> cache;
+    private final PgDataSource pgDataSource = new PgDataSource();
+    private final QueryBuilder queryBuilder = new QueryBuilder();
+    private final QueryConfigStore queryConfigStore = new QueryConfigStore();
+
+    public ResultSetService() {
+        this.cache = CacheBuilder.newBuilder()
+                .expireAfterWrite(30, TimeUnit.MINUTES)
+                .build(new CacheLoader<String, ResultSet>() {
+                    @Override
+                    public ResultSet load(String queryId) throws Exception {
+                        QueryConfig queryConfig = queryConfigStore.getQueryConfigById(queryId);
+                        if (queryConfig == null) {
+                            throw new IllegalArgumentException("Invalid query ID");
+                        }
+                        return executeQueryInternal(queryConfig);
+                    }
+                });
+    }
+
+    public ResultSet resultof(String id) {
+        return cache.getUnchecked(id);
+    }
+
+    public ResultSet resultofRange(String id, int offset, int limit) {
+        ResultSet resultSet = cache.getUnchecked(id);
+        if (resultSet == null) {
+            return null;
+        }
+        return extractRange(resultSet, offset, limit);
+    }
+
+    public int total(String id) {
+        ResultSet resultSet = cache.getUnchecked(id);
+        if (resultSet == null) {
+            return 0;
+        }
+        return calculateTotal(resultSet);
+    }
+
+    public String executeQuery(QueryConfig queryConfig) {
+        try {
+            String queryId = generateQueryId(queryConfig);
+            queryConfigStore.saveQueryConfig(queryId, queryConfig);
+            cache.put(queryId, executeQueryInternal(queryConfig));
+            return queryId;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    private ResultSet executeQueryInternal(QueryConfig queryConfig) throws Exception {
+        String sqlQuery = queryBuilder.buildQuery(queryConfig);
+        return pgDataSource.getSource().query(sqlQuery);
+    }
+
+    private String generateQueryId(QueryConfig queryConfig) {
+        return Integer.toHexString(queryConfig.hashCode());
+    }
+
+    private ResultSet extractRange(ResultSet resultSet, int offset, int limit) {
+        try {
+            resultSet.absolute(offset);
+            // Extract the limited rows and return a new ResultSet
+            // Placeholder implementation; actual logic needed
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return resultSet;
+    }
+
+    private int calculateTotal(ResultSet resultSet) {
+        try {
+            resultSet.last();
+            return resultSet.getRow();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return 0;
+    }
+}
+
+
+
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+public class QueryConfigStore {
+    private final ConcurrentMap<String, QueryConfig> queryConfigMap = new ConcurrentHashMap<>();
+
+    public void saveQueryConfig(String queryId, QueryConfig queryConfig) {
+        queryConfigMap.put(queryId, queryConfig);
+    }
+
+    public QueryConfig getQueryConfigById(String queryId) {
+        return queryConfigMap.get(queryId);
+    }
+}
+
+
+
+
+public enum DecimalType {
+    DOUBLE,
+    FLOAT,
+    BIGDECIMAL;
+
+    public static boolean isDecimalType(String type) {
+        try {
+            return Enum.valueOf(DecimalType.class, type.toUpperCase()) != null;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+}
+
+public class Main {
+
+    // Dummy Field class for demonstration purposes
+    static class Field {
+        private String type;
+
+        public Field(String type) {
+            this.type = type;
+        }
+
+        public String getType() {
+            return type;
+        }
+    }
+
+    protected boolean isDecimal(final Field f) {
+        return DecimalType.isDecimalType(f.getType().toLowerCase());
+    }
+
+    public static void main(String[] args) {
+        Main main = new Main();
+        
+        Field field1 = new Field("double");
+        Field field2 = new Field("int");
+        
+        System.out.println(main.isDecimal(field1)); // Output: true
+        System.out.println(main.isDecimal(field2)); // Output: false
+    }
+}
+
+
