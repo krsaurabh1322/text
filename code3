@@ -282,3 +282,37 @@ public class Main {
     }
 }
 
+
+
+
+import java.util.HashMap;
+import java.util.Map;
+
+public enum DataType {
+    TEXT("VARCHAR"),
+    STRING("VARCHAR"),
+    CHAR("VARCHAR");
+
+    private final String sqlType;
+    private static final Map<String, DataType> reverseLookupMap = new HashMap<>();
+
+    static {
+        for (DataType dataType : DataType.values()) {
+            reverseLookupMap.put(dataType.sqlType, dataType);
+        }
+    }
+
+    DataType(String sqlType) {
+        this.sqlType = sqlType;
+    }
+
+    public String getSqlType() {
+        return sqlType;
+    }
+
+    public static DataType fromSqlType(String sqlType) {
+        return reverseLookupMap.get(sqlType);
+    }
+}
+
+
