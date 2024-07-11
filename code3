@@ -433,3 +433,43 @@ public class RuleConverter {
         System.out.println(compositeFilter instanceof CompositeFilter); // Should print true
     }
 }
+
+
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
+
+public class ValueConverter {
+
+    public static String convertValue(Object value, String valueSource) {
+        if ("field".equalsIgnoreCase(valueSource)) {
+            return value.toString();
+        }
+
+        if (value instanceof List) {
+            StringBuilder result = new StringBuilder("(");
+            for (int i = 0; i < ((List<?>) value).size(); i++) {
+                if (i > 0) {
+                    result.append(", ");
+                }
+                result.append(convertSingleValue(((List<?>) value).get(i)));
+            }
+            result.append(")");
+            return result.toString();
+        }
+
+        return convertSingleValue(value);
+    }
+
+    private static String convertSingleValue(Object value) {
+        if (value instanceof String) {
+            return "'" + value + "'";
+        } else if (value instanceof Date) {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+            return "'" + sdf.format((Date) value) + "'";
+        } else {
+            return value.toString();
+        }
+    }
+}
