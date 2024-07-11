@@ -367,3 +367,69 @@ public class RuleConverter {
 }
 
 
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+public class ValueConverter {
+
+    public static String convertValue(Object value) {
+        if (value instanceof String) {
+            return "'" + value + "'";
+        } else if (value instanceof Date) {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+            return "'" + sdf.format((Date) value) + "'";
+        } else {
+            return value.toString();
+        }
+    }
+}
+
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class RuleConverter {
+    public static Filter convertToFilter(RuleGroupType ruleGroup) {
+        if (ruleGroup.getRules() == null || ruleGroup.getRules().isEmpty()) {
+            SimpleFilter simpleFilter = new SimpleFilter();
+            simpleFilter.setField(ruleGroup.getField());
+            simpleFilter.setValue(ValueConverter.convertValue(ruleGroup.getValue()));
+            simpleFilter.setOperator(ruleGroup.getOperator());
+            return simpleFilter;
+        } else {
+            CompositeFilter compositeFilter = new CompositeFilter();
+            compositeFilter.setOperator(ruleGroup.getOperator());
+            List<Filter> filters = new ArrayList<>();
+            for (RuleGroupType rule : ruleGroup.getRules()) {
+                filters.add(convertToFilter(rule));
+            }
+            compositeFilter.setFilters(filters);
+            return compositeFilter;
+        }
+    }
+
+    public static void main(String[] args) {
+        // Example usage
+        RuleGroupType ruleGroup = new RuleGroupType();
+        ruleGroup.setField("exampleField");
+        ruleGroup.setOperator("=");
+        ruleGroup.setValue("exampleValue");
+
+        Filter filter = convertToFilter(ruleGroup);
+        System.out.println(filter instanceof SimpleFilter); // Should print true
+
+        // Add nested rules to demonstrate CompositeFilter
+        RuleGroupType nestedRule = new RuleGroupType();
+        nestedRule.setField("nestedField");
+        nestedRule.setOperator(">");
+        nestedRule.setValue(100);
+
+        List<RuleGroupType> rules = new ArrayList<>();
+        rules.add(nestedRule);
+        ruleGroup.setRules(rules);
+
+        Filter compositeFilter = convertToFilter(ruleGroup);
+        System.out.println(compositeFilter instanceof CompositeFilter); // Should print true
+    }
+}
