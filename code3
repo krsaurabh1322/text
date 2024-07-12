@@ -473,3 +473,199 @@ public class ValueConverter {
         }
     }
 }
+
+
+
+
+
+public enum Operator {
+    LT("<") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " < " + values[0];
+        }
+    },
+    LTE("<=") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " <= " + values[0];
+        }
+    },
+    GT(">") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " > " + values[0];
+        }
+    },
+    GTE(">=") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " >= " + values[0];
+        }
+    },
+    BETWEEN("BETWEEN") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " BETWEEN " + values[0] + " AND " + values[1];
+        }
+    },
+    EQ("=") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " = " + values[0];
+        }
+    },
+    NEQ("!=") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " != " + values[0];
+        }
+    },
+    LIKE("LIKE") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " LIKE " + values[0];
+        }
+    },
+    STARTS_WITH("STARTS WITH") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " STARTS WITH " + values[0];
+        }
+    },
+    ENDS_WITH("ENDS WITH") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " ENDS WITH " + values[0];
+        }
+    },
+    CONTAINS("CONTAINS") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " CONTAINS " + values[0];
+        }
+    },
+    BLANK("BLANK") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " BLANK";
+        }
+    },
+    NOT_LIKE("NOT LIKE") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " NOT LIKE " + values[0];
+        }
+    },
+    NOT_CONTAINS("NOT CONTAINS") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " NOT CONTAINS " + values[0];
+        }
+    },
+    NOT_BLANK("NOT BLANK") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " NOT BLANK";
+        }
+    },
+    IN("IN") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " IN (" + String.join(", ", (CharSequence[]) values) + ")";
+        }
+    },
+    HAS("HAS") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " HAS (" + String.join(", ", (CharSequence[]) values) + ")";
+        }
+    },
+    EXISTS("EXISTS") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " EXISTS";
+        }
+    },
+    NOT_IN("NOT IN") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " NOT IN (" + String.join(", ", (CharSequence[]) values) + ")";
+        }
+    },
+    NOT_STARTS_WITH("NOT STARTS WITH") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " NOT STARTS WITH " + values[0];
+        }
+    },
+    NOT_ENDS_WITH("NOT ENDS WITH") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " NOT ENDS WITH " + values[0];
+        }
+    },
+    NOT_EXISTS("NOT EXISTS") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " NOT EXISTS";
+        }
+    },
+    NOT_BETWEEN("NOT BETWEEN") {
+        @Override
+        public String toSql(String col, Object... values) {
+            return col + " NOT BETWEEN " + values[0] + " AND " + values[1];
+        }
+    };
+
+    private final String operator;
+
+    Operator(String operator) {
+        this.operator = operator;
+    }
+
+    public abstract String toSql(String col, Object... values);
+
+    @Override
+    public String toString() {
+        return operator;
+    }
+}
+
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class RuleGroupType {
+    private String field;
+    private Operator operator;
+    private Object value;
+    private String valueSource;
+    private String combinatorPreceding;
+    private String combinator;
+    private List<RuleGroupType> rules;
+    private Boolean not;
+
+    // Getters and Setters
+
+    // Converting RuleGroupType to SQL
+    public String toSql() {
+        if ("value".equals(valueSource)) {
+            return operator.toSql(field, formatValue(value));
+        } else {
+            return operator.toSql(field, value);
+        }
+    }
+
+    private String formatValue(Object value) {
+        if (value instanceof String || value instanceof Character) {
+            return "'" + value + "'";
+        } else if (value instanceof List) {
+            return ((List<?>) value).stream()
+                    .map(this::formatValue)
+                    .collect(Collectors.joining(", "));
+        } else {
+            return String.valueOf(value);
+        }
+    }
+}
