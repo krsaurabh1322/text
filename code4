@@ -1,0 +1,328 @@
+import java.util.Arrays;
+import java.util.stream.Collectors;
+
+public enum Operator {
+    LT("<") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " < " + formatter.formatValue(col, values[0]);
+        }
+    },
+    LTE("<=") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " <= " + formatter.formatValue(col, values[0]);
+        }
+    },
+    GT(">") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " > " + formatter.formatValue(col, values[0]);
+        }
+    },
+    GTE(">=") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " >= " + formatter.formatValue(col, values[0]);
+        }
+    },
+    BETWEEN("BETWEEN") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " BETWEEN " + formatter.formatValue(col, values[0]) + " AND " + formatter.formatValue(col, values[1]);
+        }
+    },
+    EQ("=") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " = " + formatter.formatValue(col, values[0]);
+        }
+    },
+    NEQ("!=") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " != " + formatter.formatValue(col, values[0]);
+        }
+    },
+    LIKE("LIKE") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " LIKE " + formatter.formatValue(col, values[0]);
+        }
+    },
+    STARTS_WITH("STARTS WITH") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " STARTS WITH " + formatter.formatValue(col, values[0]);
+        }
+    },
+    ENDS_WITH("ENDS WITH") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " ENDS WITH " + formatter.formatValue(col, values[0]);
+        }
+    },
+    CONTAINS("CONTAINS") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " CONTAINS " + formatter.formatValue(col, values[0]);
+        }
+    },
+    BLANK("BLANK") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " BLANK";
+        }
+    },
+    NOT_LIKE("NOT LIKE") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT LIKE " + formatter.formatValue(col, values[0]);
+        }
+    },
+    NOT_CONTAINS("NOT CONTAINS") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT CONTAINS " + formatter.formatValue(col, values[0]);
+        }
+    },
+    NOT_BLANK("NOT BLANK") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT BLANK";
+        }
+    },
+    IN("IN") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " IN (" + valuesAsString(col, formatter, values) + ")";
+        }
+    },
+    HAS("HAS") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " HAS (" + valuesAsString(col, formatter, values) + ")";
+        }
+    },
+    EXISTS("EXISTS") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " EXISTS";
+        }
+    },
+    NOT_IN("NOT IN") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT IN (" + valuesAsString(col, formatter, values) + ")";
+        }
+    },
+    NOT_STARTS_WITH("NOT STARTS WITH") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT STARTS WITH " + formatter.formatValue(col, values[0]);
+        }
+    },
+    NOT_ENDS_WITH("NOT ENDS WITH") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT ENDS WITH " + formatter.formatValue(col, values[0]);
+        }
+    },
+    NOT_EXISTS("NOT EXISTS") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT EXISTS";
+        }
+    },
+    NOT_BETWEEN("NOT BETWEEN") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT BETWEEN " + formatter.formatValue(col, values[0]) + " AND " + formatter.formatValue(col, values[1]);
+        }
+    };
+
+    private final String operator;
+
+    Operator(String operator) {
+        this.operator = operator;
+    }
+
+    public abstract String toSql(String col, ValueFormatter formatter, Object... values);
+
+    @Override
+    public String toString() {
+        return operator;
+    }
+
+    protected String valuesAsString(String col, ValueFormatter formatter, Object... values) {
+        return Arrays.stream(values)
+                .map(value -> formatter.formatValue(col, value))
+                .collect(Collectors.joining(", "));
+    }
+}
+
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Map;
+
+public class ValueFormatter {
+
+    private final Map<String, String> fieldDataTypes;
+
+    public ValueFormatter(Map<String, String> fieldDataTypes) {
+        this.fieldDataTypes = fieldDataTypes;
+    }
+
+    public String formatValue(String field, Object value) {
+        String dataType = fieldDataTypes.get(field);
+
+        if (value == null) {
+            return "NULL";
+        }
+
+        switch (dataType) {
+            case "string":
+                return "'" + value.toString() + "'";
+            case "date":
+                return "'" + formatDate(value) + "'";
+            case "number":
+                return value.toString();
+            default:
+                return value.toString();
+        }
+    }
+
+    private String formatDate(Object value) {
+        if (value instanceof Date) {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+            return sdf.format((Date) value);
+        } else {
+            return value.toString();
+        }
+    }
+}
+
+
+
+import java.util.Arrays;
+import java.util.stream.Collectors;
+
+public enum Operator {
+    EQ("=") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " = " + formatter.formatValue(col, values[0]);
+        }
+    },
+    NEQ("!=") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " != " + formatter.formatValue(col, values[0]);
+        }
+    },
+    LT("<") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " < " + formatter.formatValue(col, values[0]);
+        }
+    },
+    LTE("<=") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " <= " + formatter.formatValue(col, values[0]);
+        }
+    },
+    GT(">") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " > " + formatter.formatValue(col, values[0]);
+        }
+    },
+    GTE(">=") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " >= " + formatter.formatValue(col, values[0]);
+        }
+    },
+    BETWEEN("BETWEEN") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " BETWEEN " + formatter.formatValue(col, values[0]) + " AND " + formatter.formatValue(col, values[1]);
+        }
+    },
+    NOT_BETWEEN("NOT BETWEEN") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT BETWEEN " + formatter.formatValue(col, values[0]) + " AND " + formatter.formatValue(col, values[1]);
+        }
+    },
+    IN("IN") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " IN (" + valuesAsString(col, formatter, values) + ")";
+        }
+    },
+    NOT_IN("NOT IN") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT IN (" + valuesAsString(col, formatter, values) + ")";
+        }
+    },
+    LIKE("LIKE") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " LIKE " + formatter.formatValue(col, values[0]);
+        }
+    },
+    NOT_LIKE("NOT LIKE") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT LIKE " + formatter.formatValue(col, values[0]);
+        }
+    },
+    ILIKE("ILIKE") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " ILIKE " + formatter.formatValue(col, values[0]);
+        }
+    },
+    NOT_ILIKE("NOT ILIKE") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " NOT ILIKE " + formatter.formatValue(col, values[0]);
+        }
+    },
+    IS_NULL("IS NULL") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " IS NULL";
+        }
+    },
+    IS_NOT_NULL("IS NOT NULL") {
+        @Override
+        public String toSql(String col, ValueFormatter formatter, Object... values) {
+            return col + " IS NOT NULL";
+        }
+    };
+
+    private final String operator;
+
+    Operator(String operator) {
+        this.operator = operator;
+    }
+
+    public abstract String toSql(String col, ValueFormatter formatter, Object... values);
+
+    @Override
+    public String toString() {
+        return operator;
+    }
+
+    protected String valuesAsString(String col, ValueFormatter formatter, Object... values) {
+        return Arrays.stream(values)
+                .map(value -> formatter.formatValue(col, value))
+                .collect(Collectors.joining(", "));
+    }
+}
+
