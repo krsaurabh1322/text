@@ -326,3 +326,88 @@ public enum Operator {
     }
 }
 
+
+
+
+public static Filter convertToFilter(RuleGroupType ruleGroup, ValueFormatter formatter) {
+    if (ruleGroup.getRules() == null || ruleGroup.getRules().isEmpty()) {
+        StringFilter stringFilter = new StringFilter();
+        String field = ruleGroup.getField();
+        Operator operator = Operator.valueOf(ruleGroup.getOperator().toUpperCase());
+        Object value = ruleGroup.getValue();
+
+        String filterString = operator.toSql(field, formatter, value);
+        stringFilter.setFilter(filterString);
+
+        return stringFilter;
+    } else {
+        CompositeFilter compositeFilter = new CompositeFilter();
+        compositeFilter.setOperator(ruleGroup.getOperator());
+
+        List<Filter> filters = new ArrayList<>();
+        for (RuleGroupType rule : ruleGroup.getRules()) {
+            filters.add(convertToFilter(rule, formatter));
+        }
+        compositeFilter.setFilters(filters);
+
+        return compositeFilter;
+    }
+}
+
+
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+
+public class Main {
+    public static void main(String[] args) {
+        // Define field data types
+        Map<String, String> fieldDataTypes = new HashMap<>();
+        fieldDataTypes.put("age", "number");
+        fieldDataTypes.put("name", "string");
+        fieldDataTypes.put("birthdate", "date");
+
+        // Create the ValueFormatter
+        ValueFormatter formatter = new ValueFormatter(fieldDataTypes);
+
+        // Example RuleGroupType with BETWEEN operator
+        RuleGroupType ruleBetween = new RuleGroupType();
+        ruleBetween.setField("age");
+        ruleBetween.setOperator("BETWEEN");
+        ruleBetween.setValue(Arrays.asList(18, 30));
+        ruleBetween.setValueSource("value");
+
+        Filter filterBetween = convertToFilter(ruleBetween, formatter);
+        System.out.println(((StringFilter) filterBetween).getFilter());  // Output: age BETWEEN 18 AND 30
+
+        // Example RuleGroupType with EQ operator for string
+        RuleGroupType ruleEqString = new RuleGroupType();
+        ruleEqString.setField("name");
+        ruleEqString.setOperator("EQ");
+        ruleEqString.setValue("John");
+        ruleEqString.setValueSource("value");
+
+        Filter filterEqString = convertToFilter(ruleEqString, formatter);
+        System.out.println(((StringFilter) filterEqString).getFilter());  // Output: name = 'John'
+
+        // Example RuleGroupType with IN operator for mixed types
+        RuleGroupType ruleIn = new RuleGroupType();
+        ruleIn.setField("name");
+        ruleIn.setOperator("IN");
+        ruleIn.setValue(Arrays.asList("John", "Doe", "Smith"));
+        ruleIn.setValueSource("value");
+
+        Filter filterIn = convertToFilter(ruleIn, formatter);
+        System.out.println(((StringFilter) filterIn).getFilter());  // Output: name IN ('John', 'Doe', 'Smith')
+
+        // Example RuleGroupType with IN operator for numbers
+        RuleGroupType ruleInNumbers = new RuleGroupType();
+        ruleInNumbers.setField("age");
+        ruleInNumbers.setOperator("IN");
+        ruleInNumbers.setValue(Arrays.asList(18, 21, 30));
+        ruleInNumbers.setValueSource("value");
+
+        Filter filterInNumbers = convertToFilter(ruleInNumbers, formatter);
+        System.out.println(((StringFilter) filterInNumbers).getFilter());  // Output: age IN (18, 21, 30)
+    }
+}
