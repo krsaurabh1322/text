@@ -411,3 +411,11 @@ public class Main {
         System.out.println(((StringFilter) filterInNumbers).getFilter());  // Output: age IN (18, 21, 30)
     }
 }
+
+
+private static final Map<String, Operator> operatorMap =
+            Arrays.stream(values()).collect(Collectors.toMap(Operator::toString, e -> e));
+
+    public static Operator fromString(String symbol) {
+        return operatorMap.get(symbol);
+    }
