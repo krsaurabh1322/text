@@ -229,3 +229,56 @@ public class FilterConverterTest {
         assertTrue(compositeFilter.getFilters().isEmpty());
     }
 }
+
+
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+public class DataTypeTest {
+
+    @Test
+    public void testGetSqlType() {
+        assertEquals("character varying", DataType.TEXT.getSqlType());
+        assertEquals("text", DataType.LONG_TEXT.getSqlType());
+        assertEquals("numeric", DataType.DECIMAL.getSqlType());
+        assertEquals("integer", DataType.INTEGER.getSqlType());
+        assertEquals("boolean", DataType.BOOLEAN.getSqlType());
+        assertEquals("timestamp without time zone", DataType.TIMESTAMP.getSqlType());
+        assertEquals("date", DataType.DATE.getSqlType());
+    }
+
+    @Test
+    public void testFromSqlType() {
+        assertEquals(DataType.TEXT, DataType.fromSqlType("character varying"));
+        assertEquals(DataType.LONG_TEXT, DataType.fromSqlType("text"));
+        assertEquals(DataType.DECIMAL, DataType.fromSqlType("numeric"));
+        assertEquals(DataType.INTEGER, DataType.fromSqlType("integer"));
+        assertEquals(DataType.BOOLEAN, DataType.fromSqlType("boolean"));
+        assertEquals(DataType.TIMESTAMP, DataType.fromSqlType("timestamp without time zone"));
+        assertEquals(DataType.DATE, DataType.fromSqlType("date"));
+        assertNull(DataType.fromSqlType("unknown type"));
+    }
+
+    @Test
+    public void testToInputType() {
+        assertEquals(InputType.TEXT, DataType.TEXT.toInputType());
+        assertEquals(InputType.TEXT, DataType.LONG_TEXT.toInputType());
+        assertEquals(InputType.NUMBER, DataType.DECIMAL.toInputType());
+        assertEquals(InputType.NUMBER, DataType.INTEGER.toInputType());
+        assertEquals(InputType.DATE, DataType.TIMESTAMP.toInputType());
+        assertEquals(InputType.DATE, DataType.DATE.toInputType());
+        assertEquals(InputType.TEXT, DataType.BOOLEAN.toInputType());
+    }
+
+    @Test
+    public void testToFieldOperators() {
+        assertEquals(FieldOperators.TEXT, DataType.TEXT.toFieldOperators());
+        assertEquals(FieldOperators.TEXT, DataType.LONG_TEXT.toFieldOperators());
+        assertEquals(FieldOperators.NUMBER, DataType.DECIMAL.toFieldOperators());
+        assertEquals(FieldOperators.NUMBER, DataType.INTEGER.toFieldOperators());
+        assertEquals(FieldOperators.DATE, DataType.TIMESTAMP.toFieldOperators());
+        assertEquals(FieldOperators.DATE, DataType.DATE.toFieldOperators());
+        assertEquals(FieldOperators.BOOL, DataType.BOOLEAN.toFieldOperators());
+    }
+}
