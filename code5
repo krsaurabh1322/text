@@ -134,3 +134,98 @@ public class OperatorTest {
         // Add other cases as needed
     }
 }
+
+
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
+public class FilterConverterTest {
+
+    private final ValueFormatter formatter = new ValueFormatter() {
+        @Override
+        public String formatValue(String col, Object value) {
+            if (value instanceof String) {
+                return "'" + value + "'";
+            } else if (value instanceof Number) {
+                return value.toString();
+            }
+            // Extend this as needed for other types
+            return value.toString();
+        }
+    };
+
+    @Test
+    public void testSimpleFilter() {
+        RuleGroupType ruleGroup = new RuleGroupType();
+        ruleGroup.setField("age");
+        ruleGroup.setOperator("eq");
+        ruleGroup.setValue(30);
+
+        Filter filter = FilterConverter.convertToFilter(ruleGroup, formatter);
+        assertTrue(filter instanceof StringFilter);
+        assertEquals("age = 30", ((StringFilter) filter).getFilter());
+    }
+
+    @Test
+    public void testSimpleFilterStringValue() {
+        RuleGroupType ruleGroup = new RuleGroupType();
+        ruleGroup.setField("name");
+        ruleGroup.setOperator("eq");
+        ruleGroup.setValue("John");
+
+        Filter filter = FilterConverter.convertToFilter(ruleGroup, formatter);
+        assertTrue(filter instanceof StringFilter);
+        assertEquals("name = 'John'", ((StringFilter) filter).getFilter());
+    }
+
+    @Test
+    public void testCompositeFilter() {
+        RuleGroupType ruleGroup1 = new RuleGroupType();
+        ruleGroup1.setField("age");
+        ruleGroup1.setOperator("gt");
+        ruleGroup1.setValue(30);
+
+        RuleGroupType ruleGroup2 = new RuleGroupType();
+        ruleGroup2.setField("name");
+        ruleGroup2.setOperator("eq");
+        ruleGroup2.setValue("John");
+
+        RuleGroupType compositeRuleGroup = new RuleGroupType();
+        compositeRuleGroup.setOperator("AND");
+        compositeRuleGroup.setRules(Arrays.asList(ruleGroup1, ruleGroup2));
+
+        Filter filter = FilterConverter.convertToFilter(compositeRuleGroup, formatter);
+        assertTrue(filter instanceof CompositeFilter);
+        CompositeFilter compositeFilter = (CompositeFilter) filter;
+        assertEquals("AND", compositeFilter.getOperator());
+
+        List<Filter> filters = compositeFilter.getFilters();
+        assertEquals(2, filters.size());
+
+        Filter firstFilter = filters.get(0);
+        assertTrue(firstFilter instanceof StringFilter);
+        assertEquals("age > 30", ((StringFilter) firstFilter).getFilter());
+
+        Filter secondFilter = filters.get(1);
+        assertTrue(secondFilter instanceof StringFilter);
+        assertEquals("name = 'John'", ((StringFilter) secondFilter).getFilter());
+    }
+
+    @Test
+    public void testEmptyCompositeFilter() {
+        RuleGroupType compositeRuleGroup = new RuleGroupType();
+        compositeRuleGroup.setOperator("AND");
+        compositeRuleGroup.setRules(Collections.emptyList());
+
+        Filter filter = FilterConverter.convertToFilter(compositeRuleGroup, formatter);
+        assertTrue(filter instanceof CompositeFilter);
+        CompositeFilter compositeFilter = (CompositeFilter) filter;
+        assertEquals("AND", compositeFilter.getOperator());
+        assertTrue(compositeFilter.getFilters().isEmpty());
+    }
+}
