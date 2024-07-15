@@ -1,0 +1,136 @@
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+public class OperatorTest {
+
+    private final ValueFormatter formatter = new ValueFormatter() {
+        @Override
+        public String formatValue(String col, Object value) {
+            if (value instanceof String) {
+                return "'" + value + "'";
+            } else if (value instanceof Number) {
+                return value.toString();
+            }
+            // Extend this as needed for other types
+            return value.toString();
+        }
+    };
+
+    @Test
+    public void testEQ() {
+        String sql = Operator.EQ.toSql("age", formatter, 30);
+        assertEquals("age = 30", sql);
+
+        sql = Operator.EQ.toSql("name", formatter, "John");
+        assertEquals("name = 'John'", sql);
+    }
+
+    @Test
+    public void testNEQ() {
+        String sql = Operator.NEQ.toSql("age", formatter, 30);
+        assertEquals("age != 30", sql);
+
+        sql = Operator.NEQ.toSql("name", formatter, "John");
+        assertEquals("name != 'John'", sql);
+    }
+
+    @Test
+    public void testLT() {
+        String sql = Operator.LT.toSql("age", formatter, 30);
+        assertEquals("age < 30", sql);
+    }
+
+    @Test
+    public void testLTE() {
+        String sql = Operator.LTE.toSql("age", formatter, 30);
+        assertEquals("age <= 30", sql);
+    }
+
+    @Test
+    public void testGT() {
+        String sql = Operator.GT.toSql("age", formatter, 30);
+        assertEquals("age > 30", sql);
+    }
+
+    @Test
+    public void testGTE() {
+        String sql = Operator.GTE.toSql("age", formatter, 30);
+        assertEquals("age >= 30", sql);
+    }
+
+    @Test
+    public void testBETWEEN() {
+        String sql = Operator.BETWEEN.toSql("age", formatter, 20, 30);
+        assertEquals("age BETWEEN 20 AND 30", sql);
+    }
+
+    @Test
+    public void testNOT_BETWEEN() {
+        String sql = Operator.NOT_BETWEEN.toSql("age", formatter, 20, 30);
+        assertEquals("age NOT BETWEEN 20 AND 30", sql);
+    }
+
+    @Test
+    public void testIN() {
+        String sql = Operator.IN.toSql("age", formatter, 20, 30, 40);
+        assertEquals("age IN (20, 30, 40)", sql);
+
+        sql = Operator.IN.toSql("name", formatter, "John", "Doe");
+        assertEquals("name IN ('John', 'Doe')", sql);
+    }
+
+    @Test
+    public void testNOT_IN() {
+        String sql = Operator.NOT_IN.toSql("age", formatter, 20, 30, 40);
+        assertEquals("age NOT IN (20, 30, 40)", sql);
+
+        sql = Operator.NOT_IN.toSql("name", formatter, "John", "Doe");
+        assertEquals("name NOT IN ('John', 'Doe')", sql);
+    }
+
+    @Test
+    public void testLIKE() {
+        String sql = Operator.LIKE.toSql("name", formatter, "John%");
+        assertEquals("name LIKE 'John%'", sql);
+    }
+
+    @Test
+    public void testNOT_LIKE() {
+        String sql = Operator.NOT_LIKE.toSql("name", formatter, "John%");
+        assertEquals("name NOT LIKE 'John%'", sql);
+    }
+
+    @Test
+    public void testILIKE() {
+        String sql = Operator.ILIKE.toSql("name", formatter, "john%");
+        assertEquals("name ILIKE 'john%'", sql);
+    }
+
+    @Test
+    public void testNOT_ILIKE() {
+        String sql = Operator.NOT_ILIKE.toSql("name", formatter, "john%");
+        assertEquals("name NOT ILIKE 'john%'", sql);
+    }
+
+    @Test
+    public void testIS_NULL() {
+        String sql = Operator.IS_NULL.toSql("name", formatter);
+        assertEquals("name IS NULL", sql);
+    }
+
+    @Test
+    public void testIS_NOT_NULL() {
+        String sql = Operator.IS_NOT_NULL.toSql("name", formatter);
+        assertEquals("name IS NOT NULL", sql);
+    }
+
+    @Test
+    public void testFromString() {
+        assertEquals(Operator.EQ, Operator.fromString("="));
+        assertEquals(Operator.NEQ, Operator.fromString("!="));
+        assertEquals(Operator.LT, Operator.fromString("<"));
+        assertEquals(Operator.GT, Operator.fromString(">"));
+        assertEquals(Operator.LIKE, Operator.fromString("LIKE"));
+        // Add other cases as needed
+    }
+}
