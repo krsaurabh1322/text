@@ -1,4 +1,4 @@
-import org.junit.jupiter.api.Test;
+miimport org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class OperatorTest {
@@ -373,4 +373,115 @@ public final class SSSourceNew {
         // Constructor and methods for JdbcResultSet
     }
 }
+
+
+
+
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Supplier;
+
+public final class SSSourceNew {
+
+    private static final String DATA_SOURCE = "dynamic_data_source";
+
+    public static class Spec {
+        private TableSpec tableSpec;
+        private int[] columnIndices;
+
+        public TableSpec getTableSpec() {
+            return tableSpec;
+        }
+
+        public int[] getColumnIndices() {
+            return columnIndices;
+        }
+
+        public void setTableSpec(TableSpec tableSpec) {
+            this.tableSpec = tableSpec;
+        }
+
+        public void setColumnIndices(int[] columnIndices) {
+            this.columnIndices = columnIndices;
+        }
+    }
+
+    public static Spec buildTableSpec(ResultSetMetaData metaData) throws SQLException {
+        TableSpec.Builder builder = TableSpec.builder()
+                .name(DATA_SOURCE)
+                .description("Dynamically created table spec");
+
+        int columnCount = metaData.getColumnCount();
+        int[] columnIndices = new int[columnCount];
+
+        for (int i = 1; i <= columnCount; i++) {
+            String columnName = metaData.getColumnName(i);
+            String columnTypeName = metaData.getColumnTypeName(i);
+            Class<?> columnClass = getClassForType(columnTypeName);
+            builder.field(columnClass)
+                    .name(columnName)
+                    .description("Dynamic column: " + columnName)
+                    .build();
+            columnIndices[i - 1] = builder.indexFor(columnName);
+        }
+
+        Spec spec = new Spec();
+        spec.setTableSpec(builder.build());
+        spec.setColumnIndices(columnIndices);
+
+        return spec;
+    }
+
+    private static Class<?> getClassForType(String typeName) {
+        return switch (typeName.toLowerCase()) {
+            case "varchar", "char", "text" -> String.class;
+            case "int", "integer", "smallint", "bigint" -> Integer.class;
+            case "decimal", "numeric", "real", "float", "double" -> Double.class;
+            case "boolean" -> Boolean.class;
+            case "date", "timestamp" -> java.sql.Date.class;
+            default -> Object.class;
+        };
+    }
+
+    public static final Supplier<Table> getTableSupplier(ResultSet rs) {
+        return () -> {
+            try {
+                Spec spec = buildTableSpec(rs.getMetaData());
+                Table table = ConcurrentTable.FACTORY.create(spec.getTableSpec());
+                load(table, rs, spec);
+                return table;
+            } catch (SQLException e) {
+                throw new RuntimeException("Error creating table from ResultSet metadata", e);
+            }
+        };
+    }
+
+    private static void load(final Table table, final ResultSet rs, final Spec spec) throws SQLException {
+        while (rs.next()) {
+            final TableRow row = table.createRow();
+            for (int i = 0; i < spec.getColumnIndices().length; i++) {
+                row.set(spec.getColumnIndices()[i], rs.getObject(i + 1));
+            }
+            table.add(row);
+        }
+    }
+
+    public class JdbcResultSet implements ResultSet {
+        private final Logger logger;
+        private final java.sql.ResultSet rs;
+        private final Int2IntHashMap fieldIndexVsSqlTypeMappings;
+        private final Object2IntHashMap<String> fieldNamesVsIndexMappings;
+        private final FieldModel fieldModel;
+        private final int total;
+        private final Range range;
+        private final AtomicInteger index;
+        private SerializableRow mutable;
+
+        // Constructor and methods for JdbcResultSet
+    }
+}
+
 
