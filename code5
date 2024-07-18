@@ -282,3 +282,95 @@ public class DataTypeTest {
         assertEquals(FieldOperators.BOOL, DataType.BOOLEAN.toFieldOperators());
     }
 }
+
+
+
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.util.function.Supplier;
+
+public final class SSSourceNew {
+    private static final String DATA_SOURCE = "dynamic_data_source";
+
+    public interface Spec {
+        // This will be dynamically created
+        TableSpec TABLE_SPEC = null;
+
+        // Indices will be set dynamically as well
+        int[] COLUMN_INDICES = null;
+    }
+
+    public static TableSpec buildTableSpec(ResultSetMetaData metaData) throws SQLException {
+        TableSpec.Builder builder = TableSpec.builder()
+                .name(DATA_SOURCE)
+                .description("Dynamically created table spec");
+
+        int columnCount = metaData.getColumnCount();
+        int[] columnIndices = new int[columnCount];
+
+        for (int i = 1; i <= columnCount; i++) {
+            String columnName = metaData.getColumnName(i);
+            String columnTypeName = metaData.getColumnTypeName(i);
+            Class<?> columnClass = getClassForType(columnTypeName);
+            builder.field(columnClass)
+                    .name(columnName)
+                    .description("Dynamic column: " + columnName)
+                    .build();
+            columnIndices[i - 1] = builder.indexFor(columnName);
+        }
+
+        Spec.TABLE_SPEC = builder.build();
+        Spec.COLUMN_INDICES = columnIndices;
+        return Spec.TABLE_SPEC;
+    }
+
+    private static Class<?> getClassForType(String typeName) {
+        return switch (typeName.toLowerCase()) {
+            case "varchar", "char", "text" -> String.class;
+            case "int", "integer", "smallint", "bigint" -> Integer.class;
+            case "decimal", "numeric", "real", "float", "double" -> Double.class;
+            case "boolean" -> Boolean.class;
+            case "date", "timestamp" -> java.sql.Date.class;
+            default -> Object.class;
+        };
+    }
+
+    public static final Supplier<Table> getTableSupplier(ResultSet rs) {
+        return () -> {
+            try {
+                TableSpec tableSpec = buildTableSpec(rs.getMetaData());
+                Table table = ConcurrentTable.FACTORY.create(tableSpec);
+                load(table, rs);
+                return table;
+            } catch (SQLException e) {
+                throw new RuntimeException("Error creating table from ResultSet metadata", e);
+            }
+        };
+    }
+
+    private static void load(final Table table, final ResultSet rs) throws SQLException {
+        while (rs.next()) {
+            final TableRow row = table.createRow();
+            for (int i = 0; i < Spec.COLUMN_INDICES.length; i++) {
+                row.set(Spec.COLUMN_INDICES[i], rs.getObject(i + 1));
+            }
+            table.add(row);
+        }
+    }
+
+    public class JdbcResultSet implements ResultSet {
+        private final Logger logger;
+        private final java.sql.ResultSet rs;
+        private final Int2IntHashMap fieldIndexVsSqlTypeMappings;
+        private final Object2IntHashMap<String> fieldNamesVsIndexMappings;
+        private final FieldModel fieldModel;
+        private final int total;
+        private final Range range;
+        private final AtomicInteger index;
+        private SerializableRow mutable;
+
+        // Constructor and methods for JdbcResultSet
+    }
+}
+
