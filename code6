@@ -7,3 +7,106 @@ public class QueryExecutionException extends RuntimeException {
         super(message, cause);
     }
 }
+
+
+
+import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+public class SSDataServiceTest {
+
+    @Mock
+    private Logger logger;
+
+    @Mock
+    private QueryBuilder<String> queryBuilder;
+
+    @Mock
+    private PgDataSource pgDataSource;
+
+    @InjectMocks
+    private SSDataService ssDataService;
+
+    @BeforeEach
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+        ssDataService = new SSDataService(logger, queryBuilder, pgDataSource);
+    }
+
+    @Test
+    public void testGetResultSetWhenCacheIsNull() {
+        String id = "test-id";
+        ConcurrentMap<String, ResultSetCache> resultSetById = new ConcurrentHashMap<>();
+        ssDataService = spy(new SSDataService(logger, queryBuilder, pgDataSource));
+        doReturn(resultSetById).when(ssDataService).getResultSetById();
+        
+        ResultSet resultSet = ssDataService.getResultSet(id);
+        
+        assertNotNull(resultSet);
+        // Add more assertions as needed based on your empty ResultSet expectations
+    }
+
+    @Test
+    public void testGetResultSetWhenCacheIsNotNull() {
+        String id = "test-id";
+        ResultSetCache cache = mock(ResultSetCache.class);
+        ConcurrentMap<String, ResultSetCache> resultSetById = new ConcurrentHashMap<>();
+        resultSetById.put(id, cache);
+        
+        ssDataService = spy(new SSDataService(logger, queryBuilder, pgDataSource));
+        doReturn(resultSetById).when(ssDataService).getResultSetById();
+        FieldModel metadata = mock(FieldModel.class);
+        when(cache.metadata()).thenReturn(metadata);
+        when(cache.findAll()).thenReturn(Stream.empty());
+        
+        ResultSet resultSet = ssDataService.getResultSet(id);
+        
+        assertNotNull(resultSet);
+        // Add more assertions as needed based on your RowAdaptor expectations
+    }
+
+    @Test
+    public void testSetupQuery() {
+        QueryPayloadConfig queryConfig = mock(QueryPayloadConfig.class);
+        String sqlQuery = "SELECT * FROM test";
+        when(queryConfig.getRequestId()).thenReturn("test-id");
+        when(queryBuilder.buildQuery(queryConfig)).thenReturn(sqlQuery);
+        
+        ResultSet resultSet = mock(ResultSet.class);
+        when(pgDataSource.getSource().query(sqlQuery)).thenReturn(resultSet);
+        
+        ssDataService.setupQuery(queryConfig);
+        
+        // Validate that resultSetById has the entry and other side effects
+    }
+
+    @Test
+    public void testSetupQueryThrowsException() {
+        QueryPayloadConfig queryConfig = mock(QueryPayloadConfig.class);
+        String sqlQuery = "SELECT * FROM test";
+        when(queryConfig.getRequestId()).thenReturn("test-id");
+        when(queryBuilder.buildQuery(queryConfig)).thenReturn(sqlQuery);
+        
+        when(pgDataSource.getSource().query(sqlQuery)).thenThrow(new RuntimeException("DB error"));
+        
+        Exception exception = assertThrows(QueryExecutionException.class, () -> {
+            ssDataService.setupQuery(queryConfig);
+        });
+        
+        assertEquals("Error in executing query Id=test-id", exception.getMessage());
+    }
+
+    // Add other tests as needed for different methods and scenarios
+
+    private ConcurrentMap<String, ResultSetCache> getResultSetById() {
+        return new ConcurrentHashMap<>();
+    }
+}
