@@ -174,3 +174,122 @@ public class QueryBuilder {
     }
 }
 
+
+
+public class SSDataService extends NamedIdleService implements DataService {
+    // ... other fields
+
+    @Override
+    public ResultSet getSlicedResultSet(final String id, final int offset, final int limit, final String sortingField, final boolean ascending) {
+        final ResultSetCache cache = resultSetById.get(id);
+        if (cache == null) {
+            return getEmptyResultSet();
+        }
+
+        if (offset >= cache.currentOffset && offset < cache.currentOffset + cache.rows.size()) {
+            // The requested data is within the cached range
+            return new RowAdaptor(cache.getMetadata())
+                .withRange(cache.getRows(offset, limit), offset, limit, cache.getTotal());
+        } else {
+            // Need to load more rows
+            return new RowAdaptor(cache.getMetadata())
+                .withRange(loadMoreRows(id, offset, limit, sortingField, ascending), offset, limit, cache.getTotal());
+        }
+    }
+
+    @Override
+    public void setupQuery(final QueryPayloadConfig queryConfig) {
+        try {
+            final String sqlQuery = queryBuilder.buildQuery(queryConfig);
+            final ResultSet resultSet = pgDataSource.getSource().query(sqlQuery);
+            final int total = resultSet.getTotalCount(); // Assuming you have a method to get the total count
+            final ResultSetCache resultSetCache = new ResultSetCache(resultSet.metadata(), cacheCapacity, total);
+            resultSetCache.addRows(resultSet.findAll().stream().limit(cacheCapacity).collect(Collectors.toList()), 0);
+            resultSetById.put(queryConfig.getRequestId(), resultSetCache);
+        } catch (final Exception e) {
+            throw new QueryExecutionException("Error in executing query Id=" + queryConfig.getRequestId(), e);
+        }
+    }
+
+    private List<Row> loadMoreRows(String id, int offset, int limit, String sortingField, boolean ascending) {
+        final ResultSetCache cache = resultSetById.get(id);
+        final String sqlQuery = queryBuilder.buildQueryForRange(offset, limit, sortingField, ascending);
+        try {
+            final ResultSet resultSet = pgDataSource.getSource().query(sqlQuery);
+            final List<Row> newRows = resultSet.findAll();
+            cache.addRows(newRows, offset);
+            return new ArrayList<>(cache.getRows(offset, limit));
+        } catch (final Exception e) {
+            throw new QueryExecutionException("Error in loading more rows for query Id=" + id, e);
+        }
+    }
+}
+
+
+public class ResultSetCache {
+    private final Deque<Row> rows;
+    private final FieldModel metadata;
+    private final int capacity;
+    private int currentOffset;
+    private final int total;
+    private String currentSortingField;
+    private boolean currentAscending;
+
+    public ResultSetCache(FieldModel metadata, int capacity, int total) {
+        this.rows = new LinkedList<>();
+        this.metadata = metadata;
+        this.capacity = capacity;
+        this.currentOffset = 0;
+        this.total = total;
+        this.currentSortingField = null;
+        this.currentAscending = true;
+    }
+
+    public FieldModel getMetadata() {
+        return metadata;
+    }
+
+    public int getTotal() {
+        return total;
+    }
+
+    public synchronized void addRows(List<Row> newRows, int offset) {
+        if (newRows.size() > capacity) {
+            throw new IllegalArgumentException("Cannot add more rows than the capacity");
+        }
+
+        while (rows.size() + newRows.size() > capacity) {
+            rows.pollFirst(); // Remove from the front
+        }
+
+        rows.addAll(newRows);
+        this.currentOffset = offset;
+    }
+
+    public synchronized List<Row> getRows(int offset, int limit) {
+        int startIndex = offset - currentOffset;
+        if (startIndex < 0 || startIndex >= rows.size()) {
+            throw new IndexOutOfBoundsException("Offset out of bounds");
+        }
+        return rows.stream()
+                .skip(startIndex)
+                .limit(limit)
+                .collect(Collectors.toList());
+    }
+
+    public synchronized void updateSorting(String sortingField, boolean ascending) {
+        this.currentSortingField = sortingField;
+        this.currentAscending = ascending;
+    }
+
+    public String getCurrentSortingField() {
+        return currentSortingField;
+    }
+
+    public boolean isCurrentAscending() {
+        return currentAscending;
+    }
+}
+
+
+
