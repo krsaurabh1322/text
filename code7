@@ -1,0 +1,176 @@
+import java.util.Deque;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class ResultSetCache {
+    private final Deque<Row> rows;
+    private final FieldModel metadata;
+    private final int capacity;
+    private int currentOffset;
+    private final int total;
+
+    public ResultSetCache(FieldModel metadata, int capacity, int total) {
+        this.rows = new LinkedList<>();
+        this.metadata = metadata;
+        this.capacity = capacity;
+        this.currentOffset = 0;
+        this.total = total;
+    }
+
+    public FieldModel getMetadata() {
+        return metadata;
+    }
+
+    public int getTotal() {
+        return total;
+    }
+
+    public synchronized void addRows(List<Row> newRows, int offset) {
+        if (newRows.size() > capacity) {
+            throw new IllegalArgumentException("Cannot add more rows than the capacity");
+        }
+
+        while (rows.size() + newRows.size() > capacity) {
+            rows.pollFirst(); // Remove from the front
+        }
+
+        rows.addAll(newRows);
+        this.currentOffset = offset;
+    }
+
+    public synchronized List<Row> getRows(int offset, int limit) {
+        int startIndex = offset - currentOffset;
+        if (startIndex < 0 || startIndex >= rows.size()) {
+            throw new IndexOutOfBoundsException("Offset out of bounds");
+        }
+        return rows.stream()
+                .skip(startIndex)
+                .limit(limit)
+                .collect(Collectors.toList());
+    }
+}
+
+
+
+public class SSDataService extends NamedIdleService implements DataService {
+    private final Logger logger;
+    private final QueryBuilder<String> queryBuilder;
+    private final PgDataSource pgDataSource;
+    private final ConcurrentMap<String, ResultSetCache> resultSetById;
+    private final int cacheCapacity = 1000;
+
+    @Inject
+    public SSDataService(final LoggerFactory loggerFactory, final QueryBuilder<String> queryBuilder, final PgDataSource pgDataSource) {
+        super(SSDataService.class.getSimpleName());
+        this.logger = loggerFactory.create(SSDataService.class);
+        this.queryBuilder = queryBuilder;
+        this.pgDataSource = pgDataSource;
+        this.resultSetById = new ConcurrentHashMap<>();
+    }
+
+    @Override
+    protected void startUp() {
+        logger.info("SelfService Data service, starting.");
+    }
+
+    @Override
+    protected void shutDown() {
+        logger.info("SelfService Data service, stopped.");
+    }
+
+    @Override
+    public ResultSet getResultSet(final String id) {
+        final ResultSetCache cache = resultSetById.get(id);
+        if (cache == null) {
+            return getEmptyResultSet();
+        }
+        return new RowAdaptor(cache.getMetadata()).apply(cache.getRows(0, cache.getTotal()));
+    }
+
+    @Override
+    public ResultSet getSlicedResultSet(final String id, final int offset, final int limit) {
+        final ResultSetCache cache = resultSetById.get(id);
+        if (cache == null) {
+            return getEmptyResultSet();
+        }
+
+        if (offset >= cache.currentOffset && offset < cache.currentOffset + cache.rows.size()) {
+            // The requested data is within the cached range
+            return new RowAdaptor(cache.getMetadata()).withRange(cache.getRows(offset, limit), offset, limit, cache.getTotal());
+        } else {
+            // Need to load more rows
+            return new RowAdaptor(cache.getMetadata()).withRange(loadMoreRows(id, offset, limit), offset, limit, cache.getTotal());
+        }
+    }
+
+    @Override
+    public ResultSet getEmptyResultSet() {
+        return new RowAdaptor(FieldModel.getDefaultInstance()).apply(Stream.empty());
+    }
+
+    @Override
+    public void setupQuery(final QueryPayloadConfig queryConfig) {
+        try {
+            final String sqlQuery = queryBuilder.buildQuery(queryConfig);
+            final ResultSet resultSet = pgDataSource.getSource().query(sqlQuery);
+            final int total = resultSet.getTotalCount(); // Assuming you have a method to get the total count
+            final ResultSetCache resultSetCache = new ResultSetCache(resultSet.metadata(), cacheCapacity, total);
+            resultSetCache.addRows(resultSet.findAll().stream().limit(cacheCapacity).collect(Collectors.toList()), 0);
+            resultSetById.put(queryConfig.getRequestId(), resultSetCache);
+        } catch (final Exception e) {
+            throw new QueryExecutionException("Error in executing query Id=" + queryConfig.getRequestId(), e);
+        }
+    }
+
+    private List<Row> loadMoreRows(String id, int offset, int limit) {
+        final ResultSetCache cache = resultSetById.get(id);
+        final int rowsToLoad = limit;
+        final String sqlQuery = queryBuilder.buildQueryForRange(offset, rowsToLoad);
+        try {
+            final ResultSet resultSet = pgDataSource.getSource().query(sqlQuery);
+            final List<Row> newRows = resultSet.findAll();
+            cache.addRows(newRows, offset);
+            return new ArrayList<>(cache.getRows(offset, limit));
+        } catch (final Exception e) {
+            throw new QueryExecutionException("Error in loading more rows for query Id=" + id, e);
+        }
+    }
+}
+
+
+public class QueryBuilder {
+    public String buildQuery(QueryPayloadConfig queryConfig) {
+        // Your existing query building logic
+        // Add sorting parameters
+        StringBuilder query = new StringBuilder();
+        query.append("SELECT * FROM table_name");
+
+        if (queryConfig.hasSorting()) {
+            query.append(" ORDER BY ");
+            query.append(queryConfig.getSortingField());
+            query.append(queryConfig.isAscending() ? " ASC" : " DESC");
+        }
+
+        return query.toString();
+    }
+
+    public String buildQueryForRange(int offset, int limit, String sortingField, boolean ascending) {
+        StringBuilder query = new StringBuilder();
+        query.append("SELECT * FROM table_name");
+
+        if (sortingField != null) {
+            query.append(" ORDER BY ");
+            query.append(sortingField);
+            query.append(ascending ? " ASC" : " DESC");
+        }
+
+        query.append(" OFFSET ");
+        query.append(offset);
+        query.append(" LIMIT ");
+        query.append(limit);
+
+        return query.toString();
+    }
+}
+
