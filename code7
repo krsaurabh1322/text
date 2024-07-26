@@ -586,3 +586,93 @@ class SortingParam {
 }
 
 
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class ResultSetCache {
+    private final Deque<Row> rows;
+    private final FieldModel metadata;
+    private final int capacity;
+    private final int total;
+    private int leftIndex;
+    private int rightIndex;
+    private List<SortingParam> currentSortingParams;
+
+    public ResultSetCache(FieldModel metadata, int capacity, int total) {
+        this.rows = new LinkedList<>();
+        this.metadata = metadata;
+        this.capacity = capacity;
+        this.total = total;
+        this.leftIndex = 0;
+        this.rightIndex = 0;
+        this.currentSortingParams = null;
+    }
+
+    public FieldModel getMetadata() {
+        return metadata;
+    }
+
+    public int getTotal() {
+        return total;
+    }
+
+    public synchronized void addRows(List<Row> newRows, int offset) {
+        if (newRows.size() > capacity) {
+            throw new IllegalArgumentException("Cannot add more rows than the capacity");
+        }
+
+        int newLeftIndex = offset;
+        int newRightIndex = offset + newRows.size();
+
+        if (newLeftIndex < leftIndex) {
+            while (rows.size() + newRows.size() > capacity) {
+                rows.pollLast(); // Remove from the back
+            }
+            rows.addAll(0, newRows); // Add to the front
+        } else {
+            while (rows.size() + newRows.size() > capacity) {
+                rows.pollFirst(); // Remove from the front
+            }
+            rows.addAll(newRows); // Add to the back
+        }
+
+        leftIndex = Math.min(leftIndex, newLeftIndex);
+        rightIndex = Math.max(rightIndex, newRightIndex);
+    }
+
+    public synchronized List<Row> getRows(int offset, int limit, DataFetcher dataFetcher) {
+        if (offset < leftIndex || offset + limit > rightIndex) {
+            fetchAndAddRows(offset, limit, dataFetcher);
+        }
+
+        int startIndex = offset - leftIndex;
+        return rows.stream()
+                .skip(startIndex)
+                .limit(limit)
+                .collect(Collectors.toList());
+    }
+
+    private void fetchAndAddRows(int offset, int limit, DataFetcher dataFetcher) {
+        int halfCapacity = capacity / 2;
+        int fetchOffset = Math.max(0, offset - halfCapacity);
+        int fetchLimit = Math.min(total - fetchOffset, capacity);
+        List<Row> fetchedRows = dataFetcher.fetchData(fetchOffset, fetchLimit);
+        addRows(fetchedRows, fetchOffset);
+    }
+
+    public synchronized void updateSorting(List<SortingParam> sortingParams) {
+        this.currentSortingParams = sortingParams;
+    }
+
+    public List<SortingParam> getCurrentSortingParams() {
+        return currentSortingParams;
+    }
+
+    @FunctionalInterface
+    public interface DataFetcher {
+        List<Row> fetchData(int offset, int limit);
+    }
+}
+
+
