@@ -292,4 +292,297 @@ public class ResultSetCache {
 }
 
 
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Collectors;
+
+public class ResultSetCache {
+    private final Deque<Row> rows;
+    private final FieldModel metadata;
+    private final int capacity;
+    private int currentOffset;
+    private final int total;
+    private List<SortingParam> currentSortingParams;
+
+    public ResultSetCache(FieldModel metadata, int capacity, int total) {
+        this.rows = new LinkedList<>();
+        this.metadata = metadata;
+        this.capacity = capacity;
+        this.currentOffset = 0;
+        this.total = total;
+        this.currentSortingParams = null;
+    }
+
+    public FieldModel getMetadata() {
+        return metadata;
+    }
+
+    public int getTotal() {
+        return total;
+    }
+
+    public synchronized void addRows(List<Row> newRows, int offset) {
+        if (newRows.size() > capacity) {
+            throw new IllegalArgumentException("Cannot add more rows than the capacity");
+        }
+
+        int halfCapacity = capacity / 2;
+
+        // Remove rows from the deque to maintain the half-capacity window
+        while (rows.size() + newRows.size() > capacity) {
+            if (offset < currentOffset) {
+                rows.pollLast(); // Remove from the end
+            } else {
+                rows.pollFirst(); // Remove from the front
+            }
+        }
+
+        if (offset < currentOffset) {
+            rows.addAll(0, newRows); // Add new rows at the beginning
+            currentOffset = offset;
+        } else {
+            rows.addAll(newRows); // Add new rows at the end
+        }
+
+        if (rows.size() > capacity) {
+            currentOffset += rows.size() - capacity; // Adjust offset if rows exceed capacity
+            while (rows.size() > capacity) {
+                rows.pollFirst(); // Ensure the size is within capacity
+            }
+        }
+    }
+
+    public synchronized List<Row> getRows(int offset, int limit) {
+        // Calculate the new window bounds
+        int halfCapacity = capacity / 2;
+        int newStart = Math.max(0, offset - halfCapacity);
+        int newEnd = Math.min(total, offset + limit + halfCapacity);
+
+        // If the requested range is outside the cached data, fetch new data
+        if (offset < currentOffset || offset + limit > currentOffset + rows.size()) {
+            fetchDataFromDatabase(newStart, newEnd - newStart);
+        }
+
+        int startIndex = offset - currentOffset;
+        if (startIndex < 0 || startIndex >= rows.size()) {
+            throw new IndexOutOfBoundsException("Offset out of bounds");
+        }
+
+        return rows.stream()
+                .skip(startIndex)
+                .limit(limit)
+                .collect(Collectors.toList());
+    }
+
+    private void fetchDataFromDatabase(int offset, int limit) {
+        // Calculate the new window bounds
+        int halfCapacity = capacity / 2;
+        int newStart = Math.max(0, offset - halfCapacity);
+        int newEnd = Math.min(total, offset + limit + halfCapacity);
+
+        // Fetch data from the database within the new window bounds
+        List<Row> newRows = fetchFromDatabase(newStart, newEnd - newStart);
+
+        // Adjust the deque to maintain the capacity
+        while (rows.size() + newRows.size() > capacity) {
+            rows.pollFirst(); // Remove from the front
+        }
+
+        // Update the deque with the new data
+        rows.clear();
+        rows.addAll(newRows);
+        currentOffset = newStart;
+    }
+
+    private List<Row> fetchFromDatabase(int offset, int limit) {
+        // Placeholder for database fetch logic
+        // Replace with actual implementation to fetch rows from the database
+        return new ArrayList<>();
+    }
+
+    public synchronized void updateSorting(List<SortingParam> sortingParams) {
+        this.currentSortingParams = sortingParams;
+        // Clear the cache and refetch data with new sorting parameters
+        rows.clear();
+        fetchDataFromDatabase(currentOffset, capacity);
+    }
+
+    public List<SortingParam> getCurrentSortingParams() {
+        return currentSortingParams;
+    }
+}
+
+class Row {
+    // Placeholder class for row data
+}
+
+class FieldModel {
+    // Placeholder class for field metadata
+    public static FieldModel getDefaultInstance() {
+        return new FieldModel();
+    }
+}
+
+class SortingParam {
+    // Placeholder class for sorting parameters
+}
+
+
+
+id,name,amount
+1,John Doe,100
+2,Jane Smith,200
+3,Bob Johnson,300
+...
+50,Mary Clark,5000
+
+
+
+import java.util.HashMap;
+import java.util.Map;
+
+public class SimpleRow implements Row {
+    private final Map<String, Object> data;
+
+    public SimpleRow() {
+        this.data = new HashMap<>();
+    }
+
+    @Override
+    public String key() {
+        return String.valueOf(data.get("id"));
+    }
+
+    @Override
+    public <V> V get(int index) {
+        throw new UnsupportedOperationException("Get by index not supported in this implementation.");
+    }
+
+    @Override
+    public <V> V get(String fieldName) {
+        return (V) data.get(fieldName);
+    }
+
+    @Override
+    public <V> Row set(int index, V value) {
+        throw new UnsupportedOperationException("Set by index not supported in this implementation.");
+    }
+
+    @Override
+    public <V> Row set(String fieldName, V value) {
+        data.put(fieldName, value);
+        return this;
+    }
+
+    @Override
+    public Map<String, Object> toMap() {
+        return new HashMap<>(data);
+    }
+
+    @Override
+    public Row copy() {
+        SimpleRow copy = new SimpleRow();
+        copy.data.putAll(this.data);
+        return copy;
+    }
+}
+
+
+
+import org.junit.Before;
+import org.junit.Test;
+import org.mockito.Mockito;
+
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
+
+public class ResultSetCacheTest {
+    private static final String CSV_FILE = "data.csv";
+    private ResultSetCache cache;
+    private FieldModel fieldModel;
+    private List<Row> rows;
+
+    @Before
+    public void setUp() throws IOException {
+        fieldModel = mock(FieldModel.class);
+        rows = loadRowsFromCSV(CSV_FILE);
+        cache = new ResultSetCache(fieldModel, 10, rows.size());
+    }
+
+    @Test
+    public void testAddRows() {
+        cache.addRows(rows.subList(0, 10), 0);
+        assertEquals(10, cache.getRows(0, 10).size());
+    }
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void testGetRowsOutOfBounds() {
+        cache.addRows(rows.subList(0, 10), 0);
+        cache.getRows(20, 10);
+    }
+
+    @Test
+    public void testGetRowsWithinBounds() {
+        cache.addRows(rows.subList(0, 10), 0);
+        List<Row> result = cache.getRows(5, 5);
+        assertEquals(5, result.size());
+        assertEquals("6", result.get(0).get("id"));
+    }
+
+    @Test
+    public void testUpdateSorting() {
+        cache.addRows(rows.subList(0, 10), 0);
+        List<SortingParam> sortingParams = new ArrayList<>();
+        sortingParams.add(new SortingParam("amount", true));
+        cache.updateSorting(sortingParams);
+        assertEquals(sortingParams, cache.getCurrentSortingParams());
+    }
+
+    private List<Row> loadRowsFromCSV(String filePath) throws IOException {
+        List<Row> rows = new ArrayList<>();
+        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            boolean isHeader = true;
+            while ((line = br.readLine()) != null) {
+                if (isHeader) {
+                    isHeader = false;
+                    continue;
+                }
+                String[] values = line.split(",");
+                Row row = new SimpleRow();
+                row.set("id", values[0])
+                   .set("name", values[1])
+                   .set("amount", Integer.parseInt(values[2]));
+                rows.add(row);
+            }
+        }
+        return rows;
+    }
+}
+
+class SortingParam {
+    private final String field;
+    private final boolean ascending;
+
+    public SortingParam(String field, boolean ascending) {
+        this.field = field;
+        this.ascending = ascending;
+    }
+
+    public String getField() {
+        return field;
+    }
+
+    public boolean isAscending() {
+        return ascending;
+    }
+}
+
 
