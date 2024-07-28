@@ -676,3 +676,34 @@ public class ResultSetCache {
 }
 
 
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assertions;
+
+import java.util.List;
+
+public class QueryPayloadConfigTest {
+
+    @Test
+    public void testEqualsWithDifferentFilters() {
+        // Create two QueryPayloadConfig objects
+        QueryPayloadConfig config1 = QueryPayloadConfig.builder()
+                // ... other fields ...
+                .filters(List.of(new Filter("filter1")))
+                .orderBys(List.of(new FieldOrder("field1", Order.ASC)))
+                .build();
+
+        QueryPayloadConfig config2 = QueryPayloadConfig.builder()
+                // ... other fields ...
+                .filters(List.of(new Filter("filter1"), new Filter("filter2"))) // Different filters
+                .orderBys(List.of(new FieldOrder("field1", Order.ASC)))
+                .build();
+
+        // Assert that the objects are not equal due to different filters
+        Assertions.assertNotEquals(config1, config2);
+    }
+
+    // ... other test cases for different scenarios ...
+}
+
+
