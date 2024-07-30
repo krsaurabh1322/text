@@ -1,0 +1,74 @@
+// add_indexes.js
+
+// Connect to the database
+const db = connect('mongodb://your_mongo_db_url');
+
+// Define the collections
+const limitCollection = db.getCollection('limit');
+const dealCollection = db.getCollection('deal');
+
+// Add indexes to the 'limit' collection
+limitCollection.createIndex({ field1: 1 }, { name: 'field1_index' });
+limitCollection.createIndex({ field2: -1 }, { name: 'field2_desc_index' });
+
+// Add indexes to the 'deal' collection
+dealCollection.createIndex({ field3: 1 }, { name: 'field3_index' });
+dealCollection.createIndex({ field4: -1, field5: 1 }, { name: 'compound_index' });
+
+print('Indexes added successfully.');
+
+
+// rollback_indexes.js
+
+// Connect to the database
+const db = connect('mongodb://your_mongo_db_url');
+
+// Define the collections
+const limitCollection = db.getCollection('limit');
+const dealCollection = db.getCollection('deal');
+
+// Remove indexes from the 'limit' collection
+limitCollection.dropIndex('field1_index');
+limitCollection.dropIndex('field2_desc_index');
+
+// Remove indexes from the 'deal' collection
+dealCollection.dropIndex('field3_index');
+dealCollection.dropIndex('compound_index');
+
+print('Indexes removed successfully.');
+
+
+// add_indexes.js
+
+// Connect to the database
+const db = connect('mongodb://your_mongo_db_url');
+
+// Define the collections
+const limitCollection = db.getCollection('limit');
+const dealCollection = db.getCollection('deal');
+
+// Add compound indexes to the 'limit' collection
+limitCollection.createIndex({ field1: 1, field2: 1 }, { name: 'field1_field2_compound_index' });
+
+// Add compound indexes to the 'deal' collection
+dealCollection.createIndex({ field3: 1, field4: 1 }, { name: 'field3_field4_compound_index' });
+
+print('Compound indexes added successfully.');
+
+
+// rollback_indexes.js
+
+// Connect to the database
+const db = connect('mongodb://your_mongo_db_url');
+
+// Define the collections
+const limitCollection = db.getCollection('limit');
+const dealCollection = db.getCollection('deal');
+
+// Remove compound indexes from the 'limit' collection
+limitCollection.dropIndex('field1_field2_compound_index');
+
+// Remove compound indexes from the 'deal' collection
+dealCollection.dropIndex('field3_field4_compound_index');
+
+print('Compound indexes removed successfully.');
