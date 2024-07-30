@@ -72,3 +72,6 @@ limitCollection.dropIndex('field1_field2_compound_index');
 dealCollection.dropIndex('field3_field4_compound_index');
 
 print('Compound indexes removed successfully.');
+
+
+(?i)\\bFROM\\b.*?(?=\\s+ORDER\\s+BY\\s+|$)
