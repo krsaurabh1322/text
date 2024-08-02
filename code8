@@ -75,3 +75,76 @@ print('Compound indexes removed successfully.');
 
 
 (?i)\\bFROM\\b.*?(?=\\s+ORDER\\s+BY\\s+|$)
+
+
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Consumer;
+
+import org.apache.commons.lang3.mutable.MutableInt;
+
+public class YourClass {
+    
+    // Assuming you have this method to get the ResultSet
+    public ResultSet getResultSet(QueryConfig queryConfig) {
+        // Your implementation to get the ResultSet
+        return pgDataSource.getSource().query(queryConfig.getRawQuery());
+    }
+
+    // New method to perform the asynchronous query and update CSV
+    public CompletableFuture<Void> executeAsyncQueryWithCustomResultSet(final QueryConfig queryConfig, final Consumer<ResultSet> resultSetConsumer, final Executor executor) {
+        checkNotNull(resultSetConsumer, "consumer is null");
+        checkNotNull(executor, "executor is null");
+        checkNotNull(queryConfig, "queryConfig is null");
+
+        return CompletableFuture.runAsync(() -> {
+            try (ResultSet resultSet = getResultSet(queryConfig)) {
+                resultSetConsumer.accept(resultSet);
+            } catch (final Exception e) {
+                Logger.warn("Failed to execute query, can be ignored if interrupted [name={}, raw={}]", queryConfig.getStreamName(), queryConfig.getRawQuery(), e);
+            }
+        }, executor);
+    }
+
+    public void exportToCsv(QueryConfig queryConfig, Executor executor) {
+        final MutableInt total = new MutableInt();
+
+        CompletableFuture<Void> voidCompletableFuture = executeAsyncQueryWithCustomResultSet(queryConfig, rs -> {
+            try {
+                total.setValue(getTotalCountFromResultSet(rs));
+                // Use rs to populate your CSV data here if needed
+            } catch (SQLException e) {
+                Logger.error("Error processing ResultSet", e);
+            }
+        }, executor);
+
+        voidCompletableFuture.whenComplete((unused, throwable) -> {
+            if (throwable == null) {
+                csvExport
+                    .fileName("test.csv")
+                    .query(queryConfig.getRawQuery())
+                    .columns(getColumnsFromQueryConfig(queryConfig))
+                    .numOfRows(total.intValue())
+                    .trigger();
+            } else {
+                Logger.error("Error executing async query", throwable);
+            }
+        });
+    }
+
+    private int getTotalCountFromResultSet(ResultSet rs) throws SQLException {
+        int totalCount = 0;
+        while (rs.next()) {
+            totalCount++;
+        }
+        return totalCount;
+    }
+
+    private String[] getColumnsFromQueryConfig(QueryConfig queryConfig) {
+        // Implement this method to extract column names from queryConfig
+        return new String[] { "column1", "column2", "column3" }; // Example columns
+    }
+}
+
