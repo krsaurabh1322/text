@@ -1,0 +1,55 @@
+### Synopsis for Using Hazelcast Jet for Real-Time Computing
+
+#### **Overview:**
+Hazelcast Jet is a distributed stream processing engine that excels at processing large volumes of data in real-time with low latency. It is designed to handle both batch and streaming data processing tasks with high throughput, making it ideal for scenarios where time-sensitive calculations and actions are critical. In a financial context, Jet can be used for real-time risk assessment, fraud detection, trade execution, and more.
+
+#### **Key Features of Hazelcast Jet:**
+1. **Real-Time Stream Processing:**
+   - Jet processes data as it arrives, allowing for immediate analysis and decision-making. This is crucial in financial environments where data such as market prices or transactions need to be acted upon instantly.
+
+2. **Distributed Architecture:**
+   - Jet operates in a distributed manner, meaning it can scale horizontally by adding more nodes to the cluster. This ensures that it can handle large volumes of data and complex computations efficiently.
+
+3. **SQL Integration with Jet SQL:**
+   - Hazelcast Jet allows you to query streams of data using familiar SQL syntax through Jet SQL. This makes it easy to perform complex operations like joins, aggregations, and filtering on streaming data.
+
+4. **Fault Tolerance and Reliability:**
+   - Jet provides built-in fault tolerance mechanisms such as state checkpointing and distributed processing, ensuring that your data processing pipelines are robust and reliable.
+
+5. **Low Latency:**
+   - With its in-memory data processing capabilities, Jet ensures that computations are performed with minimal delay, which is essential for time-critical applications in finance.
+
+#### **Benefits for Users:**
+- **Improved Decision-Making:** By processing data in real-time, financial analysts and traders can make more informed decisions quickly, reacting to market changes as they happen.
+- **Enhanced Operational Efficiency:** Automating real-time data processing reduces the need for manual intervention, streamlining operations and reducing errors.
+- **Scalability:** Jet's distributed nature means that it can easily scale to meet the demands of growing data volumes without compromising on performance.
+- **Flexibility with SQL Queries:** Users familiar with SQL can leverage their existing knowledge to query real-time data streams, making it easier to implement complex logic without needing to learn a new programming paradigm.
+
+#### **Demo Outline:**
+The demo will showcase Hazelcast Jet's real-time processing capabilities through a simulated data feed, where we will perform aggregations on a joined SQL query.
+
+**1. **Setting Up the Simulation:**
+   - Create a simulated real-time data feed (e.g., stock prices or transaction streams) that generates data continuously.
+   - Set up a static reference table (e.g., product details or customer information) that will be joined with the real-time stream.
+
+**2. **Building the Jet Pipeline:**
+   - Construct a Jet pipeline that reads from the simulated data feed.
+   - Use Jet SQL to join the real-time stream with the static reference data.
+   - Perform an aggregation operation (e.g., `SUM`, `COUNT`, or `AVG`) on the joined data, such as summing up transaction amounts or counting the number of transactions per product.
+
+**3. **Executing the Pipeline:**
+   - Deploy the pipeline on a Hazelcast Jet cluster and demonstrate how it processes the incoming data in real-time.
+   - Showcase the low-latency, real-time aggregation results that are updated as new data arrives in the stream.
+
+**4. **Visualization:**
+   - Optionally, integrate the output of the Jet pipeline with a dashboard or logging system to visualize the real-time results.
+
+**5. **Conclusion:**
+   - Summarize the benefits of using Hazelcast Jet for real-time processing in financial applications, emphasizing the speed, scalability, and ease of use that Jet provides.
+
+#### **Expected Outcomes:**
+- Attendees will gain an understanding of how Hazelcast Jet can be used to process and analyze data in real-time.
+- The demo will illustrate the practical applications of real-time computing in finance, such as monitoring and aggregating financial data streams on the fly.
+- Users will see the advantages of using Jet SQL for performing complex operations on streaming data, demonstrating how they can leverage Jet in their own real-time data processing needs.
+
+This synopsis and demo will give a comprehensive view of Hazelcast Jet's capabilities and its practical benefits for real-time financial data processing.
