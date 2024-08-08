@@ -97,3 +97,97 @@ By leveraging Hazelcast Jet, we aim to deliver a high-performance query processi
 ---
 
 This explanation highlights the key benefits and implementation plan for using Hazelcast Jet in your project, emphasizing how it will improve both query performance and dashboard responsiveness.
+
+
+I can describe how to draw a flow diagram for Hazelcast Jet pipelines, but since I can't draw directly, I'll outline the components and their connections. You can use this description to create a diagram using drawing tools like Microsoft Visio, Lucidchart, or even on paper.
+
+### Flow Diagram for Hazelcast Jet Pipeline
+
+#### Components:
+
+1. **Data Source**
+   - **Examples:** Kafka Topic, File System, Database
+   - **Description:** The starting point where data is ingested into the system.
+
+2. **Jet Pipeline**
+   - **Components:**
+     - **Ingestion Stage**
+     - **Processing Stage**
+       - **Transformation**
+       - **Filtering**
+       - **Joining**
+       - **Aggregation**
+     - **Intermediate Storage (optional)**
+       - **Hazelcast IMDG (if used)**
+     - **Output Stage**
+   - **Description:** The core processing unit where data is handled in real-time.
+
+3. **Data Sink**
+   - **Examples:** Database, File System, Dashboard, Alert System
+   - **Description:** The destination where processed data or results are sent.
+
+#### Flow Diagram Description:
+
+1. **Start**:
+   - Draw a box labeled **"Data Source"**.
+   - Inside this box, note possible sources like **Kafka Topic**, **File System**, or **Database**.
+
+2. **Data Ingestion**:
+   - Draw an arrow from **Data Source** to a box labeled **"Jet Pipeline"**.
+   - Inside **"Jet Pipeline"**, draw a series of stages:
+     - **Ingestion Stage**: Receives data from the data source.
+     - **Processing Stage**: Includes multiple components:
+       - **Transformation**: Processes and alters the data.
+       - **Filtering**: Removes unnecessary data based on conditions.
+       - **Joining**: Combines data from multiple sources.
+       - **Aggregation**: Summarizes or aggregates the data (e.g., sum, average).
+     - **Intermediate Storage (optional)**: A box labeled **"Hazelcast IMDG"** to show that data can be cached or stored in-memory for faster access.
+
+3. **Output Stage**:
+   - Draw an arrow from **Jet Pipeline** to a box labeled **"Data Sink"**.
+   - Inside **"Data Sink"**, note possible destinations like **Database**, **File System**, **Dashboard**, or **Alert System**.
+
+4. **End**:
+   - Show the final destination where the results are used or stored.
+
+### Diagram Layout Example:
+
+```
+ +------------------+
+ |   Data Source    |
+ | (Kafka, Files,   |
+ |  Database)       |
+ +------------------+
+          |
+          v
+ +------------------+
+ |   Jet Pipeline   |
+ |  +------------+  |
+ |  | Ingestion  |  |
+ |  |  Stage     |  |
+ |  +------------+  |
+ |  +------------+  |
+ |  | Processing |  |
+ |  | Stage      |  |
+ |  |  (Transform,| |
+ |  |  Filter,    | |
+ |  |  Join,      | |
+ |  |  Aggregate) | |
+ |  +------------+  |
+ |  +------------+  |
+ |  | IMDG (opt.) |  |
+ |  +------------+  |
+ +------------------+
+          |
+          v
+ +------------------+
+ |    Data Sink     |
+ | (Database, Files,|
+ |  Dashboard,      |
+ |  Alert System)   |
+ +------------------+
+```
+
+### Summary:
+
+This flow diagram illustrates the process of ingesting data, processing it in a Jet pipeline with optional intermediate storage using Hazelcast IMDG, and then sending the results to various sinks. The pipeline stages ensure real-time, low-latency processing through in-memory execution and parallel processing.
