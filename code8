@@ -148,3 +148,28 @@ public class YourClass {
     }
 }
 
+
+public List<ListItem<?>> filterListItemsByValues(List<ListItem<?>> originalList, List<String> filterValues) {
+    return originalList.stream()
+        .map(item -> {
+            if (item.getValue() instanceof List) {
+                List<?> subItems = (List<?>) item.getValue();
+                List<ListItem<?>> filteredSubItems = subItems.stream()
+                    .filter(subItem -> subItem instanceof ListItem && filterValues.contains(((ListItem<?>) subItem).getValue()))
+                    .map(subItem -> (ListItem<?>) subItem)
+                    .collect(Collectors.toList());
+
+                if (!filteredSubItems.isEmpty()) {
+                    return ListItem.builder()
+                        .label(item.getLabel())
+                        .value(filteredSubItems)
+                        .build();
+                }
+            }
+            return null;
+        })
+        .filter(Objects::nonNull)
+        .collect(Collectors.toList());
+}
+
+
