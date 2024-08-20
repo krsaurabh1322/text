@@ -270,3 +270,51 @@ class ListUtilsTest {
                     .map(subItem -> (ListItem<?>) subItem)
                     .collect(Collectors.toList());
 
+
+public static RuleGroupType convertToRuleGroupType(final Filter filter, final ValueFormatter formatter) {
+    if (filter instanceof StringFilter) {
+        StringFilter stringFilter = (StringFilter) filter;
+        
+        RuleGroupType ruleGroup = new RuleGroupType();
+        ruleGroup.setField(extractFieldFromFilterString(stringFilter.getValue()));
+        ruleGroup.setOperator(extractOperatorFromFilterString(stringFilter.getValue()));
+        ruleGroup.setValue(extractValueFromFilterString(stringFilter.getValue()));
+        
+        return ruleGroup;
+    } else if (filter instanceof CompositeFilter) {
+        CompositeFilter compositeFilter = (CompositeFilter) filter;
+        
+        RuleGroupType ruleGroup = new RuleGroupType();
+        ruleGroup.setCombinator(compositeFilter.getOperator());
+        ruleGroup.setNot(compositeFilter.isNot());
+        
+        List<RuleGroupType> rules = new ArrayList<>();
+        for (Filter subFilter : compositeFilter.getFilters()) {
+            RuleGroupType subRuleGroup = convertToRuleGroupType(subFilter, formatter);
+            if (subRuleGroup != null) {
+                rules.add(subRuleGroup);
+            }
+        }
+        ruleGroup.setRules(rules);
+        
+        return ruleGroup;
+    }
+    return null;
+}
+
+private static String extractFieldFromFilterString(String filterString) {
+    // Logic to extract the field from the filter string
+    return "extractedField";
+}
+
+private static String extractOperatorFromFilterString(String filterString) {
+    // Logic to extract the operator from the filter string
+    return "extractedOperator";
+}
+
+private static Object extractValueFromFilterString(String filterString) {
+    // Logic to extract the value from the filter string
+    return "extractedValue";
+}
+
+
