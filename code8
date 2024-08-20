@@ -173,3 +173,91 @@ public List<ListItem<?>> filterListItemsByValues(List<ListItem<?>> originalList,
 }
 
 
+
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
+class ListUtilsTest {
+
+    @Test
+    void testFilterListItemsByValuesWithReverseFalse() {
+        // Create sample data
+        ListItem<String> subItem1 = ListItem.<String>builder().label("subItem1").value("value1").build();
+        ListItem<String> subItem2 = ListItem.<String>builder().label("subItem2").value("value2").build();
+        ListItem<String> subItem3 = ListItem.<String>builder().label("subItem3").value("value3").build();
+
+        List<ListItem<?>> originalList = Arrays.asList(
+            ListItem.<List<ListItem<?>>>builder()
+                .label("item1")
+                .value(Arrays.asList(subItem1, subItem2))
+                .build(),
+            ListItem.<List<ListItem<?>>>builder()
+                .label("item2")
+                .value(Collections.singletonList(subItem3))
+                .build()
+        );
+
+        List<String> filterValues = Arrays.asList("value1");
+
+        // Execute the method with reverse = false (include values)
+        List<ListItem<?>> result = filterListItemsByValues(originalList, filterValues, false);
+
+        // Verify the result
+        assertEquals(2, result.size());
+
+        ListItem<?> item1 = result.get(0);
+        assertEquals("item1", item1.getLabel());
+        List<?> item1Value = (List<?>) item1.getValue();
+        assertEquals(1, item1Value.size());
+        assertEquals("value1", ((ListItem<?>) item1Value.get(0)).getValue());
+
+        ListItem<?> item2 = result.get(1);
+        assertEquals("item2", item2.getLabel());
+        List<?> item2Value = (List<?>) item2.getValue();
+        assertEquals(0, item2Value.size());
+    }
+
+    @Test
+    void testFilterListItemsByValuesWithReverseTrue() {
+        // Create sample data
+        ListItem<String> subItem1 = ListItem.<String>builder().label("subItem1").value("value1").build();
+        ListItem<String> subItem2 = ListItem.<String>builder().label("subItem2").value("value2").build();
+        ListItem<String> subItem3 = ListItem.<String>builder().label("subItem3").value("value3").build();
+
+        List<ListItem<?>> originalList = Arrays.asList(
+            ListItem.<List<ListItem<?>>>builder()
+                .label("item1")
+                .value(Arrays.asList(subItem1, subItem2))
+                .build(),
+            ListItem.<List<ListItem<?>>>builder()
+                .label("item2")
+                .value(Collections.singletonList(subItem3))
+                .build()
+        );
+
+        List<String> filterValues = Arrays.asList("value1");
+
+        // Execute the method with reverse = true (exclude values)
+        List<ListItem<?>> result = filterListItemsByValues(originalList, filterValues, true);
+
+        // Verify the result
+        assertEquals(2, result.size());
+
+        ListItem<?> item1 = result.get(0);
+        assertEquals("item1", item1.getLabel());
+        List<?> item1Value = (List<?>) item1.getValue();
+        assertEquals(1, item1Value.size());
+        assertEquals("value2", ((ListItem<?>) item1Value.get(0)).getValue());
+
+        ListItem<?> item2 = result.get(1);
+        assertEquals("item2", item2.getLabel());
+        List<?> item2Value = (List<?>) item2.getValue();
+        assertEquals(1, item2Value.size());
+        assertEquals("value3", ((ListItem<?>) item2Value.get(0)).getValue());
+    }
+}
+
