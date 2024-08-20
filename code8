@@ -261,3 +261,12 @@ class ListUtilsTest {
     }
 }
 
+
+
+.filter(subItem -> {
+                        String value = ((ListItem<?>) subItem).getValue();
+                        return reverse ? !filterValues.contains(value) : filterValues.contains(value);
+                    })
+                    .map(subItem -> (ListItem<?>) subItem)
+                    .collect(Collectors.toList());
+
