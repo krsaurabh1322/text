@@ -318,3 +318,103 @@ private static Object extractValueFromFilterString(String filterString) {
 }
 
 
+public enum FilterOperator {
+    LT("<") {
+        @Override
+        public RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter) {
+            return createRuleGroupFromSql(sqlString, this);
+        }
+    },
+    LTE("<=") {
+        @Override
+        public RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter) {
+            return createRuleGroupFromSql(sqlString, this);
+        }
+    },
+    GT(">") {
+        @Override
+        public RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter) {
+            return createRuleGroupFromSql(sqlString, this);
+        }
+    },
+    GTE(">=") {
+        @Override
+        public RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter) {
+            return createRuleGroupFromSql(sqlString, this);
+        }
+    },
+    NEQ("!=") {
+        @Override
+        public RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter) {
+            return createRuleGroupFromSql(sqlString, this);
+        }
+    },
+    BETWEEN("BETWEEN") {
+        @Override
+        public RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter) {
+            return createRuleGroupFromSql(sqlString, this, true);
+        }
+    },
+    NOT_BETWEEN("NOT BETWEEN") {
+        @Override
+        public RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter) {
+            return createRuleGroupFromSql(sqlString, this, true);
+        }
+    },
+    BEGINS_WITH("ILIKE") {
+        @Override
+        public RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter) {
+            return createRuleGroupFromSql(sqlString, this);
+        }
+    },
+    ENDS_WITH("ILIKE") {
+        @Override
+        public RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter) {
+            return createRuleGroupFromSql(sqlString, this);
+        }
+    };
+
+    private final String symbol;
+
+    FilterOperator(String symbol) {
+        this.symbol = symbol;
+    }
+
+    public abstract RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter);
+
+    protected RuleGroupType createRuleGroupFromSql(String sqlString, FilterOperator operator) {
+        return createRuleGroupFromSql(sqlString, operator, false);
+    }
+
+    protected RuleGroupType createRuleGroupFromSql(String sqlString, FilterOperator operator, boolean isBetween) {
+        String[] tokens = sqlString.split(" ");
+        String field = tokens[0];
+        Object value;
+
+        if (isBetween) {
+            value = new Object[]{tokens[2], tokens[4]};  // Assuming "BETWEEN value1 AND value2"
+        } else if (operator == BEGINS_WITH || operator == ENDS_WITH) {
+            value = tokens[2].replace("%", "");  // Strip '%' for BEGINS_WITH and ENDS_WITH
+        } else {
+            value = tokens[2];
+        }
+
+        RuleGroupType ruleGroup = new RuleGroupType();
+        ruleGroup.setField(field);
+        ruleGroup.setOperator(operator.name());
+        ruleGroup.setValue(value);
+
+        return ruleGroup;
+    }
+
+    public static FilterOperator fromString(String operatorStr) {
+        for (FilterOperator operator : FilterOperator.values()) {
+            if (operator.symbol.equals(operatorStr)) {
+                return operator;
+            }
+        }
+        throw new IllegalArgumentException("Invalid operator: " + operatorStr);
+    }
+}
+
+
