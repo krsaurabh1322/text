@@ -418,3 +418,16 @@ public enum FilterOperator {
 }
 
 
+
+String sqlString = "field_name < value1";
+ValueFormatter formatter = new ValueFormatter();  // Assuming this is your formatter implementation
+
+// Extract the operator symbol from the SQL string (e.g., "<")
+String operatorSymbol = sqlString.split(" ")[1];
+FilterOperator operator = FilterOperator.fromString(operatorSymbol);
+
+RuleGroupType ruleGroup = operator.fromSql(sqlString, formatter);
+
+// Now `ruleGroup` contains the corresponding `RuleGroupType` object
+
+
