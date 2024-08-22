@@ -530,3 +530,120 @@ public enum FilterOperator {
 
 
 
+
+public enum FilterOperator {
+    LT("<") {
+        @Override
+        protected Object extractValue(SqlParts parts) {
+            return parts.value;
+        }
+    },
+    LTE("<=") {
+        @Override
+        protected Object extractValue(SqlParts parts) {
+            return parts.value;
+        }
+    },
+    GT(">") {
+        @Override
+        protected Object extractValue(SqlParts parts) {
+            return parts.value;
+        }
+    },
+    GTE(">=") {
+        @Override
+        protected Object extractValue(SqlParts parts) {
+            return parts.value;
+        }
+    },
+    NEQ("!=") {
+        @Override
+        protected Object extractValue(SqlParts parts) {
+            return parts.value;
+        }
+    },
+    BETWEEN("BETWEEN") {
+        @Override
+        protected Object extractValue(SqlParts parts) {
+            return new Object[]{parts.value, parts.secondValue}; // Handle the BETWEEN range
+        }
+    },
+    NOT_BETWEEN("NOT BETWEEN") {
+        @Override
+        protected Object extractValue(SqlParts parts) {
+            return new Object[]{parts.value, parts.secondValue}; // Handle the NOT BETWEEN range
+        }
+    },
+    BEGINS_WITH("ILIKE") {
+        @Override
+        protected Object extractValue(SqlParts parts) {
+            return parts.value.replace("%", ""); // Remove '%' from the value
+        }
+    },
+    ENDS_WITH("ILIKE") {
+        @Override
+        protected Object extractValue(SqlParts parts) {
+            return parts.value.replace("%", ""); // Remove '%' from the value
+        }
+    };
+
+    private final String symbol;
+
+    FilterOperator(String symbol) {
+        this.symbol = symbol;
+    }
+
+    public RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter) {
+        SqlParts parts = parseSqlString(sqlString);
+
+        Object value = extractValue(parts);
+
+        RuleGroupType ruleGroup = new RuleGroupType();
+        ruleGroup.setField(parts.field);
+        ruleGroup.setOperator(this.name());
+        ruleGroup.setValue(value);
+
+        return ruleGroup;
+    }
+
+    protected abstract Object extractValue(SqlParts parts);
+
+    public static FilterOperator fromString(String operatorStr) {
+        for (FilterOperator operator : FilterOperator.values()) {
+            if (operator.symbol.equalsIgnoreCase(operatorStr)) {
+                return operator;
+            }
+        }
+        throw new IllegalArgumentException("Invalid operator: " + operatorStr);
+    }
+
+    private static SqlParts parseSqlString(String sqlString) {
+        String[] tokens = sqlString.split(" ");
+        String field = tokens[0];
+        String operator = tokens[1];
+
+        // Handle cases with two values (e.g., BETWEEN value1 AND value2)
+        String value = tokens[2];
+        String secondValue = null;
+        if (tokens.length > 3) {
+            secondValue = tokens[4];
+        }
+
+        return new SqlParts(field, operator, value, secondValue);
+    }
+
+    private static class SqlParts {
+        String field;
+        String operator;
+        String value;
+        String secondValue;
+
+        SqlParts(String field, String operator, String value, String secondValue) {
+            this.field = field;
+            this.operator = operator;
+            this.value = value;
+            this.secondValue = secondValue;
+        }
+    }
+}
+
