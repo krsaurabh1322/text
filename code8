@@ -431,3 +431,102 @@ RuleGroupType ruleGroup = operator.fromSql(sqlString, formatter);
 // Now `ruleGroup` contains the corresponding `RuleGroupType` object
 
 
+
+public enum FilterOperator {
+    LT("<") {
+        @Override
+        protected Object extractValue(String[] tokens) {
+            return tokens[2]; // The value follows the field and operator
+        }
+    },
+    LTE("<=") {
+        @Override
+        protected Object extractValue(String[] tokens) {
+            return tokens[2];
+        }
+    },
+    GT(">") {
+        @Override
+        protected Object extractValue(String[] tokens) {
+            return tokens[2];
+        }
+    },
+    GTE(">=") {
+        @Override
+        protected Object extractValue(String[] tokens) {
+            return tokens[2];
+        }
+    },
+    NEQ("!=") {
+        @Override
+        protected Object extractValue(String[] tokens) {
+            return tokens[2];
+        }
+    },
+    BETWEEN("BETWEEN") {
+        @Override
+        protected Object extractValue(String[] tokens) {
+            return new Object[]{tokens[2], tokens[4]}; // "BETWEEN value1 AND value2"
+        }
+    },
+    NOT_BETWEEN("NOT BETWEEN") {
+        @Override
+        protected Object extractValue(String[] tokens) {
+            return new Object[]{tokens[2], tokens[5]}; // "NOT BETWEEN value1 AND value2"
+        }
+    },
+    BEGINS_WITH("ILIKE") {
+        @Override
+        protected Object extractValue(String[] tokens) {
+            return tokens[2].replace("%", ""); // Remove '%' from the value
+        }
+    },
+    ENDS_WITH("ILIKE") {
+        @Override
+        protected Object extractValue(String[] tokens) {
+            return tokens[2].replace("%", ""); // Remove '%' from the value
+        }
+    };
+
+    private final String symbol;
+
+    FilterOperator(String symbol) {
+        this.symbol = symbol;
+    }
+
+    /**
+     * Parses the SQL-like string to extract the field, operator, and value, 
+     * and converts it to a RuleGroupType.
+     */
+    public RuleGroupType fromSql(final String sqlString, final ValueFormatter formatter) {
+        String[] tokens = sqlString.split(" ");
+
+        String field = tokens[0];            // Extract the field name
+        Object value = extractValue(tokens); // Extract the value based on the operator
+
+        RuleGroupType ruleGroup = new RuleGroupType();
+        ruleGroup.setField(field);
+        ruleGroup.setOperator(this.name());
+        ruleGroup.setValue(value);
+
+        return ruleGroup;
+    }
+
+    /**
+     * Extracts the value part from the SQL-like string tokens based on the operator.
+     * This method should be overridden by each operator that needs custom handling.
+     */
+    protected abstract Object extractValue(String[] tokens);
+
+    public static FilterOperator fromString(String operatorStr) {
+        for (FilterOperator operator : FilterOperator.values()) {
+            if (operator.symbol.equalsIgnoreCase(operatorStr)) {
+                return operator;
+            }
+        }
+        throw new IllegalArgumentException("Invalid operator: " + operatorStr);
+    }
+}
+
+
+
