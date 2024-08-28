@@ -647,3 +647,62 @@ public enum FilterOperator {
     }
 }
 
+
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+public class YourServiceTest {
+
+    @Mock
+    private QueryConfigRepository queryConfigRepository;
+
+    @InjectMocks
+    private YourService yourService;
+
+    private QueryPayloadConfig queryConfig;
+
+    @BeforeEach
+    void setUp() {
+        queryConfig = new QueryPayloadConfig();
+        // Set up queryConfig with appropriate test data
+    }
+
+    @Test
+    void saveConfig_success() {
+        // Given: Set up your QueryPayloadConfig with some test data
+        when(queryConfigRepository.save(any(QueryConfigurationEntity.class)))
+            .thenReturn(new QueryConfigurationEntity());
+
+        // When
+        boolean result = yourService.saveConfig(queryConfig);
+
+        // Then
+        assertTrue(result);
+        verify(queryConfigRepository, times(1)).save(any(QueryConfigurationEntity.class));
+    }
+
+    @Test
+    void saveConfig_failure() {
+        // Given: Simulate an exception when saving
+        when(queryConfigRepository.save(any(QueryConfigurationEntity.class)))
+            .thenThrow(new RuntimeException("DB Save Error"));
+
+        // When
+        boolean result = yourService.saveConfig(queryConfig);
+
+        // Then
+        assertFalse(result);
+        verify(queryConfigRepository, times(1)).save(any(QueryConfigurationEntity.class));
+    }
+}
+
