@@ -706,3 +706,74 @@ public class YourServiceTest {
     }
 }
 
+
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.*;
+
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyString;
+
+@ExtendWith(MockitoExtension.class)
+public class YourServiceTest {
+
+    @Mock
+    private QueryConfigRepository queryConfigRepository;
+
+    @InjectMocks
+    private YourService yourService;
+
+    private QueryConfigurationEntity queryConfigurationEntity;
+
+    @BeforeEach
+    void setUp() {
+        queryConfigurationEntity = new QueryConfigurationEntity();
+        queryConfigurationEntity.setName("testName");
+        queryConfigurationEntity.setDimensions(Arrays.asList("dim1", "dim2"));
+        queryConfigurationEntity.setMeasures(Arrays.asList("measure1", "measure2"));
+        queryConfigurationEntity.setFilters(Arrays.asList(new Filter())); // Add relevant filters
+        LinkedHashMap<String, String> orderByMap = new LinkedHashMap<>();
+        orderByMap.put("field1", "ASC");
+        queryConfigurationEntity.setOrderByMap(orderByMap);
+    }
+
+    @Test
+    void getConfigByName_success() {
+        // Given
+        when(queryConfigRepository.findFirstByName(anyString())).thenReturn(Optional.of(queryConfigurationEntity));
+
+        // When
+        Optional<QueryPayloadConfig> result = yourService.getConfigByName("testName");
+
+        // Then
+        assertTrue(result.isPresent());
+        QueryPayloadConfig config = result.get();
+        assertTrue(config.getRequestId().equals("testName"));
+        assertTrue(config.getDimensions().contains("dim1"));
+        assertTrue(config.getMeasures().contains("measure1"));
+        assertTrue(config.getOrderBys().size() == 1);
+    }
+
+    @Test
+    void getConfigByName_notFound() {
+        // Given
+        when(queryConfigRepository.findFirstByName(anyString())).thenReturn(Optional.empty());
+
+        // When
+        Optional<QueryPayloadConfig> result = yourService.getConfigByName("testName");
+
+        // Then
+        assertFalse(result.isPresent());
+    }
+}
+
+
+
