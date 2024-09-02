@@ -1,0 +1,174 @@
+To automatically populate the `custom_calculations` section of your JSON configuration using Java, you can define a Java class structure that represents the JSON structure. You can then use an object mapping library like Jackson to serialize these objects into JSON.
+
+Here's how you can do it:
+
+### Step 1: Define the Java Classes
+
+Create Java classes that represent the structure of your JSON configuration, including `CustomCalculation`.
+
+```java
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.*;
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+class TableConfig {
+    private String name;
+    private String schema;
+    private List<String> dimensions;
+    private Map<String, String> measures;
+
+    // Constructors, getters, and setters
+    public TableConfig(String name, String schema, List<String> dimensions, Map<String, String> measures) {
+        this.name = name;
+        this.schema = schema;
+        this.dimensions = dimensions;
+        this.measures = measures;
+    }
+
+    // Getters and setters...
+}
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+class JoinConfig {
+    private String leftTable;
+    private String rightTable;
+    private String condition;
+
+    // Constructors, getters, and setters
+    public JoinConfig(String leftTable, String rightTable, String condition) {
+        this.leftTable = leftTable;
+        this.rightTable = rightTable;
+        this.condition = condition;
+    }
+
+    // Getters and setters...
+}
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+class CustomCalculation {
+    private String formula;
+    private Set<String> aggregates;
+    private Set<String> tables;
+
+    // Constructors, getters, and setters
+    public CustomCalculation(String formula, Set<String> aggregates, Set<String> tables) {
+        this.formula = formula;
+        this.aggregates = aggregates;
+        this.tables = tables;
+    }
+
+    // Getters and setters...
+}
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+class QueryConfig {
+    private List<TableConfig> tables;
+    private List<JoinConfig> joins;
+    private Map<String, CustomCalculation> customCalculations;
+
+    // Constructors, getters, and setters
+    public QueryConfig(List<TableConfig> tables, List<JoinConfig> joins, Map<String, CustomCalculation> customCalculations) {
+        this.tables = tables;
+        this.joins = joins;
+        this.customCalculations = customCalculations;
+    }
+
+    // Getters and setters...
+}
+```
+
+### Step 2: Populate the Data
+
+You can now create instances of these classes, populate them with data, and then serialize them to JSON using Jackson's `ObjectMapper`.
+
+```java
+public class QueryConfigBuilder {
+
+    public static void main(String[] args) throws JsonProcessingException {
+        // Define tables
+        TableConfig limitView = new TableConfig(
+                "limit_view", "tas_faa_lh",
+                Arrays.asList("limit_id", "limit_product_code"),
+                Map.of("current_limit_amount", "SUM")
+        );
+
+        TableConfig creditView = new TableConfig(
+                "credit_view", "tas_faa_lh",
+                Arrays.asList("credit_id", "credit_management_product_code", "credit_management_product_desc"),
+                null
+        );
+
+        // Define joins
+        JoinConfig joinConfig = new JoinConfig(
+                "limit_view", "credit_view", "limit_view.client_le_id = credit_view.client_le_id"
+        );
+
+        // Automatically define custom calculations
+        CustomCalculation rwaCalculation = new CustomCalculation(
+                "SUM(credit_view.credit_amount * limit_view.risk_weight)",
+                Set.of("credit_view.credit_amount", "limit_view.risk_weight"),
+                Set.of("limit_view", "credit_view")
+        );
+
+        Map<String, CustomCalculation> customCalculations = new HashMap<>();
+        customCalculations.put("RWA", rwaCalculation);
+
+        // Build the full query config
+        QueryConfig queryConfig = new QueryConfig(
+                Arrays.asList(limitView, creditView),
+                Arrays.asList(joinConfig),
+                customCalculations
+        );
+
+        // Serialize to JSON
+        ObjectMapper objectMapper = new ObjectMapper();
+        String jsonString = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(queryConfig);
+        System.out.println(jsonString);
+    }
+}
+```
+
+### Step 3: Output the JSON
+
+Running the above code will produce a JSON string that represents your configuration, including the automatically populated `custom_calculations`.
+
+### Example Output
+
+```json
+{
+  "tables" : [ {
+    "name" : "limit_view",
+    "schema" : "tas_faa_lh",
+    "dimensions" : [ "limit_id", "limit_product_code" ],
+    "measures" : {
+      "current_limit_amount" : "SUM"
+    }
+  }, {
+    "name" : "credit_view",
+    "schema" : "tas_faa_lh",
+    "dimensions" : [ "credit_id", "credit_management_product_code", "credit_management_product_desc" ]
+  } ],
+  "joins" : [ {
+    "leftTable" : "limit_view",
+    "rightTable" : "credit_view",
+    "condition" : "limit_view.client_le_id = credit_view.client_le_id"
+  } ],
+  "custom_calculations" : {
+    "RWA" : {
+      "formula" : "SUM(credit_view.credit_amount * limit_view.risk_weight)",
+      "aggregates" : [ "credit_view.credit_amount", "limit_view.risk_weight" ],
+      "tables" : [ "limit_view", "credit_view" ]
+    }
+  }
+}
+```
+
+### Summary:
+- **Define Java Classes**: Represent your JSON structure as Java classes.
+- **Populate Data**: Create instances of these classes, populate them with data, including automatically generating custom calculations.
+- **Serialize to JSON**: Use Jackson’s `ObjectMapper` to convert the populated Java objects into a JSON string.
+
+This approach allows you to dynamically build your JSON configuration programmatically, ensuring it accurately reflects the required structure, including custom calculations, without needing to manually write the JSON.
