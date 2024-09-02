@@ -172,3 +172,125 @@ Running the above code will produce a JSON string that represents your configura
 - **Serialize to JSON**: Use Jackson’s `ObjectMapper` to convert the populated Java objects into a JSON string.
 
 This approach allows you to dynamically build your JSON configuration programmatically, ensuring it accurately reflects the required structure, including custom calculations, without needing to manually write the JSON.
+
+
+The error you're encountering typically happens when Jackson tries to deserialize a string into an enum but can't find a matching enum constant. To resolve this, you need to ensure that your enum and deserialization logic are correctly set up.
+
+Here’s how you can fix it:
+
+### Enum `DataType` Setup
+
+Ensure that your `DataType` enum is correctly annotated to handle string values during deserialization:
+
+```java
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
+
+public enum DataType {
+    DECIMAL("numeric"),
+    TEXT("text"),
+    BOOLEAN("boolean"),
+    DATE("date");
+
+    private final String value;
+
+    DataType(String value) {
+        this.value = value;
+    }
+
+    @JsonValue
+    public String getValue() {
+        return value;
+    }
+
+    @JsonCreator
+    public static DataType fromValue(String value) {
+        for (DataType type : DataType.values()) {
+            if (type.getValue().equalsIgnoreCase(value)) {
+                return type;
+            }
+        }
+        throw new IllegalArgumentException("Unknown data type: " + value);
+    }
+}
+```
+
+### Explanation:
+
+1. **`@JsonValue`:** This annotation is used on the `getValue()` method to specify that when this enum is serialized, its value should be used.
+
+2. **`@JsonCreator`:** This annotation marks the `fromValue(String)` static method as the factory method to create an enum constant from a JSON string. It will be invoked during deserialization, converting the string value (like `"numeric"`) into the corresponding enum constant (like `DECIMAL`).
+
+### Test JSON Example
+
+Make sure your JSON is structured like this:
+
+```json
+{
+  "tables": [
+    {
+      "name": "measure_view",
+      "schema": "tas_faa_lh",
+      "measures": {
+        "current_limit_amount": "SUM",
+        "RWA": "SUM"
+      },
+      "derived_fields": {
+        "RWA": {
+          "formula": "(a_value * b_value) / c_value",
+          "data_type": "numeric"
+        }
+      }
+    }
+  ]
+}
+```
+
+### Deserialize Example
+
+Here’s how you can deserialize the JSON with your `ObjectMapper`:
+
+```java
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.Map;
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        String jsonString = "{\n" +
+            "  \"tables\": [\n" +
+            "    {\n" +
+            "      \"name\": \"measure_view\",\n" +
+            "      \"schema\": \"tas_faa_lh\",\n" +
+            "      \"measures\": {\n" +
+            "        \"current_limit_amount\": \"SUM\",\n" +
+            "        \"RWA\": \"SUM\"\n" +
+            "      },\n" +
+            "      \"derived_fields\": {\n" +
+            "        \"RWA\": {\n" +
+            "          \"formula\": \"(a_value * b_value) / c_value\",\n" +
+            "          \"data_type\": \"numeric\"\n" +
+            "        }\n" +
+            "      }\n" +
+            "    }\n" +
+            "  ]\n" +
+            "}";
+
+        ObjectMapper mapper = new ObjectMapper();
+        RootConfig config = mapper.readValue(jsonString, RootConfig.class);
+
+        TableConfig tableConfig = config.getTables().get(0);
+        Map<String, DerivedField> derivedFields = tableConfig.getDerivedFields();
+
+        DerivedField rwaField = derivedFields.get("RWA");
+        System.out.println("Formula: " + rwaField.getFormula());
+        System.out.println("Data Type: " + rwaField.getDataType());  // Should print: DECIMAL
+    }
+}
+```
+
+### Key Points:
+- Ensure that the string values in your JSON (`"numeric"`, `"text"`, etc.) match exactly with the values specified in your `DataType` enum's `value` field.
+- The `@JsonCreator` method will correctly map the string values from your JSON to the corresponding enum constants during deserialization.
+
+With this setup, your enum should correctly handle the deserialization process without errors.
