@@ -294,3 +294,21 @@ public class Main {
 - The `@JsonCreator` method will correctly map the string values from your JSON to the corresponding enum constants during deserialization.
 
 With this setup, your enum should correctly handle the deserialization process without errors.
+
+
+public enum DataType {
+    STRING,
+    NUMERIC,
+    BOOLEAN;
+
+    public static DataType fromString(String value) {
+        if (value == null) {
+            return NUMERIC;
+        }
+        try {
+            return DataType.valueOf(value.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return NUMERIC;
+        }
+    }
+}
