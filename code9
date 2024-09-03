@@ -312,3 +312,40 @@ public enum DataType {
         }
     }
 }
+
+
+
+import org.junit.Test;
+import static org.junit.Assert.*;
+
+public class DataTypeTest {
+
+    @Test
+    public void testFromString_withValidValues() {
+        assertEquals(DataType.STRING, DataType.fromString("STRING"));
+        assertEquals(DataType.BOOLEAN, DataType.fromString("BOOLEAN"));
+        assertEquals(DataType.NUMERIC, DataType.fromString("NUMERIC"));
+    }
+
+    @Test
+    public void testFromString_withLowercaseValues() {
+        assertEquals(DataType.STRING, DataType.fromString("string"));
+        assertEquals(DataType.BOOLEAN, DataType.fromString("boolean"));
+        assertEquals(DataType.NUMERIC, DataType.fromString("numeric"));
+    }
+
+    @Test
+    public void testFromString_withInvalidValue() {
+        assertEquals(DataType.NUMERIC, DataType.fromString("unknown"));
+    }
+
+    @Test
+    public void testFromString_withNullValue() {
+        assertEquals(DataType.NUMERIC, DataType.fromString(null));
+    }
+
+    @Test
+    public void testFromString_withMixedCaseValue() {
+        assertEquals(DataType.STRING, DataType.fromString("StRiNg"));
+    }
+}
