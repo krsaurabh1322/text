@@ -349,3 +349,29 @@ public class DataTypeTest {
         assertEquals(DataType.STRING, DataType.fromString("StRiNg"));
     }
 }
+
+
+public class StringExtractor {
+
+    public static String extractValue(String input) {
+        if (input == null) {
+            return null;
+        }
+
+        int start = input.indexOf('(');
+        int end = input.lastIndexOf(')');
+
+        if (start != -1 && end != -1 && start < end) {
+            return input.substring(start + 1, end);
+        }
+
+        return ""; // Return an empty string if no valid parentheses are found
+    }
+
+    public static void main(String[] args) {
+        // Example usage
+        String input = "xyz(value)";
+        String result = extractValue(input);
+        System.out.println(result); // Output: value
+    }
+}
