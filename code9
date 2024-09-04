@@ -375,3 +375,81 @@ public class StringExtractor {
         System.out.println(result); // Output: value
     }
 }
+
+
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class StringExtractorTest {
+
+    @Test
+    void testExtractValue_withValidInput() {
+        String input = "xyz(value)";
+        String expected = "value";
+        assertEquals(expected, StringExtractor.extractValue(input));
+    }
+
+    @Test
+    void testExtractValue_withTextBeforeAndAfterParentheses() {
+        String input = "abc(anotherValue)xyz";
+        String expected = "anotherValue";
+        assertEquals(expected, StringExtractor.extractValue(input));
+    }
+
+    @Test
+    void testExtractValue_withEmptyString() {
+        String input = "";
+        String expected = "";
+        assertEquals(expected, StringExtractor.extractValue(input));
+    }
+
+    @Test
+    void testExtractValue_withNoParentheses() {
+        String input = "noParentheses";
+        String expected = "";
+        assertEquals(expected, StringExtractor.extractValue(input));
+    }
+
+    @Test
+    void testExtractValue_withMismatchedParentheses_startOnly() {
+        String input = "mismatch(value";
+        String expected = "";
+        assertEquals(expected, StringExtractor.extractValue(input));
+    }
+
+    @Test
+    void testExtractValue_withMismatchedParentheses_endOnly() {
+        String input = "value)";
+        String expected = "";
+        assertEquals(expected, StringExtractor.extractValue(input));
+    }
+
+    @Test
+    void testExtractValue_withMultipleParentheses() {
+        String input = "abc(def(ghi)jkl)mno";
+        String expected = "def(ghi)jkl";  // Extracts the entire middle portion
+        assertEquals(expected, StringExtractor.extractValue(input));
+    }
+
+    @Test
+    void testExtractValue_withNullInput() {
+        String input = null;
+        String expected = null;
+        assertEquals(expected, StringExtractor.extractValue(input));
+    }
+
+    @Test
+    void testExtractValue_withEmptyParentheses() {
+        String input = "xyz()";
+        String expected = "";
+        assertEquals(expected, StringExtractor.extractValue(input));
+    }
+
+    @Test
+    void testExtractValue_withWhitespaceInsideParentheses() {
+        String input = "xyz( value )";
+        String expected = " value ";
+        assertEquals(expected, StringExtractor.extractValue(input));
+    }
+}
