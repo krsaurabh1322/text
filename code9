@@ -453,3 +453,12 @@ class StringExtractorTest {
         assertEquals(expected, StringExtractor.extractValue(input));
     }
 }
+
+
+
+HAVING 
+    CASE 
+        WHEN SUM(measure_view.rwa) IS NULL OR SUM(measure_view.rwa) = 0 THEN NULL
+        ELSE (SUM(measure_view.total_revenue_ytd) * 12) / SUM(measure_view.rwa)
+    END > 0
+
