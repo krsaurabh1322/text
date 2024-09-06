@@ -462,3 +462,9 @@ HAVING
         ELSE (SUM(measure_view.total_revenue_ytd) * 12) / SUM(measure_view.rwa)
     END > 0
 
+{
+  "$or": [
+    { "id1": { "$eq": null } },
+    { "id2": { "$eq": null } }
+  ]
+}
