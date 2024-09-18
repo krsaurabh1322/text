@@ -1,0 +1,213 @@
+Here’s a detailed breakdown of the table creation and indexing commands for all three approaches: **hybrid partitioning** (on both `is_active` and `business_date`), **partitioning only by `business_date`**, and **partitioning only by `is_active`**.
+
+### 1. **Hybrid Partitioning: `is_active` + `business_date`**
+
+In this approach, we first partition the table based on `is_active`, and then further sub-partition each section (active and historical records) by `business_date`. This ensures efficient querying for both active records and historical records by utilizing partition pruning.
+
+#### Table Creation with Hybrid Partitioning:
+```sql
+-- Main table partitioned by is_active
+CREATE TABLE your_table (
+    id SERIAL PRIMARY KEY,
+    bca_reference_number VARCHAR NOT NULL,
+    facility_id VARCHAR NOT NULL,
+    valid_from TIMESTAMP NOT NULL,
+    valid_to TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE,
+    business_date DATE NOT NULL
+) PARTITION BY LIST (is_active);
+
+-- Active records partition
+CREATE TABLE active_records PARTITION OF your_table
+FOR VALUES IN (TRUE)
+PARTITION BY RANGE (business_date);
+
+-- Historical records partition
+CREATE TABLE historical_records PARTITION OF your_table
+FOR VALUES IN (FALSE)
+PARTITION BY RANGE (business_date);
+```
+
+#### Sub-partitioning by `business_date`:
+```sql
+-- Sub-partitioning for active records (monthly)
+CREATE TABLE active_records_2024_09 PARTITION OF active_records
+FOR VALUES FROM ('2024-09-01') TO ('2024-10-01');
+
+CREATE TABLE active_records_2024_10 PARTITION OF active_records
+FOR VALUES FROM ('2024-10-01') TO ('2024-11-01');
+
+-- Sub-partitioning for historical records (monthly)
+CREATE TABLE historical_records_2024_08 PARTITION OF historical_records
+FOR VALUES FROM ('2024-08-01') TO ('2024-09-01');
+
+CREATE TABLE historical_records_2024_09 PARTITION OF historical_records
+FOR VALUES FROM ('2024-09-01') TO ('2024-10-01');
+```
+
+#### Indexing for Efficient Queries:
+```sql
+-- Composite index for active records (bca_reference_number and facility_id)
+CREATE INDEX idx_active_bca_facility ON active_records_2024_09 (bca_reference_number, facility_id);
+CREATE INDEX idx_active_bca_facility ON active_records_2024_10 (bca_reference_number, facility_id);
+
+-- Composite index for historical records
+CREATE INDEX idx_historical_bca_facility ON historical_records_2024_08 (bca_reference_number, facility_id);
+CREATE INDEX idx_historical_bca_facility ON historical_records_2024_09 (bca_reference_number, facility_id);
+```
+
+#### Querying:
+
+1. **Fetch Active Record**:
+   ```sql
+   SELECT * 
+   FROM active_records
+   WHERE bca_reference_number = 'some_ref'
+     AND facility_id = 'some_facility'
+     AND is_active = TRUE;
+   ```
+
+2. **Fetch Historical Records by Date**:
+   ```sql
+   SELECT * 
+   FROM historical_records
+   WHERE bca_reference_number = 'some_ref'
+     AND facility_id = 'some_facility'
+     AND business_date BETWEEN '2024-08-01' AND '2024-09-01';
+   ```
+
+---
+
+### 2. **Partitioning by `business_date` Only**
+
+In this approach, the table is partitioned solely by `business_date`. This is simpler but might be less efficient for querying active records, as they are spread across multiple partitions.
+
+#### Table Creation with Partitioning on `business_date`:
+```sql
+-- Main table partitioned by business_date
+CREATE TABLE your_table (
+    id SERIAL PRIMARY KEY,
+    bca_reference_number VARCHAR NOT NULL,
+    facility_id VARCHAR NOT NULL,
+    valid_from TIMESTAMP NOT NULL,
+    valid_to TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE,
+    business_date DATE NOT NULL
+) PARTITION BY RANGE (business_date);
+```
+
+#### Creating Monthly Partitions:
+```sql
+-- Monthly partitions by business_date
+CREATE TABLE your_table_2024_09 PARTITION OF your_table
+FOR VALUES FROM ('2024-09-01') TO ('2024-10-01');
+
+CREATE TABLE your_table_2024_10 PARTITION OF your_table
+FOR VALUES FROM ('2024-10-01') TO ('2024-11-01');
+```
+
+#### Indexing:
+```sql
+-- Composite index for querying by reference and facility
+CREATE INDEX idx_bca_facility_2024_09 ON your_table_2024_09 (bca_reference_number, facility_id);
+
+-- Add index on is_active for filtering
+CREATE INDEX idx_is_active_2024_09 ON your_table_2024_09 (is_active);
+```
+
+#### Querying:
+
+1. **Fetch Active Record** (you will need to filter based on `is_active` and `business_date`):
+   ```sql
+   SELECT * 
+   FROM your_table
+   WHERE bca_reference_number = 'some_ref'
+     AND facility_id = 'some_facility'
+     AND is_active = TRUE;
+   ```
+
+   PostgreSQL will scan all partitions unless specific dates are provided.
+
+2. **Fetch Historical Record by Date**:
+   ```sql
+   SELECT * 
+   FROM your_table_2024_09
+   WHERE bca_reference_number = 'some_ref'
+     AND facility_id = 'some_facility';
+   ```
+
+---
+
+### 3. **Partitioning by `is_active` Only**
+
+This approach is the simplest in terms of setup, as the table is only partitioned based on `is_active`. However, querying historical records may be less efficient without partitioning by `business_date`.
+
+#### Table Creation with Partitioning on `is_active`:
+```sql
+-- Main table partitioned by is_active
+CREATE TABLE your_table (
+    id SERIAL PRIMARY KEY,
+    bca_reference_number VARCHAR NOT NULL,
+    facility_id VARCHAR NOT NULL,
+    valid_from TIMESTAMP NOT NULL,
+    valid_to TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE,
+    business_date DATE NOT NULL
+) PARTITION BY LIST (is_active);
+```
+
+#### Creating Partitions:
+```sql
+-- Partition for active records
+CREATE TABLE active_records PARTITION OF your_table
+FOR VALUES IN (TRUE);
+
+-- Partition for historical records
+CREATE TABLE historical_records PARTITION OF your_table
+FOR VALUES IN (FALSE);
+```
+
+#### Indexing:
+```sql
+-- Composite index for active records
+CREATE INDEX idx_active_bca_facility ON active_records (bca_reference_number, facility_id);
+
+-- Composite index for historical records
+CREATE INDEX idx_historical_bca_facility ON historical_records (bca_reference_number, facility_id);
+```
+
+#### Querying:
+
+1. **Fetch Active Record**:
+   ```sql
+   SELECT * 
+   FROM active_records
+   WHERE bca_reference_number = 'some_ref'
+     AND facility_id = 'some_facility';
+   ```
+
+2. **Fetch Historical Records** (you would need to scan all historical records without date partitioning):
+   ```sql
+   SELECT * 
+   FROM historical_records
+   WHERE bca_reference_number = 'some_ref'
+     AND facility_id = 'some_facility';
+   ```
+
+---
+
+### Summary of Pros and Cons:
+
+1. **Hybrid Partitioning (`is_active` + `business_date`)**:
+   - **Pros**: Best for performance, scales well with both active and historical records, efficient partition pruning.
+   - **Cons**: More complex setup.
+
+2. **Partitioning by `business_date` Only**:
+   - **Pros**: Simple to manage, partitions naturally over time.
+   - **Cons**: Slower queries for active records, since they are spread across multiple partitions.
+
+3. **Partitioning by `is_active` Only**:
+   - **Pros**: Very simple, efficient for querying active records.
+   - **Cons**: Less efficient for historical records without `business_date` partitioning, and `is_active` partition could grow large over time.
+
+For high scalability and better performance in querying both active and historical records, **hybrid partitioning** is the most effective, though it does involve a bit more setup.
