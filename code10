@@ -211,3 +211,126 @@ CREATE INDEX idx_historical_bca_facility ON historical_records (bca_reference_nu
    - **Cons**: Less efficient for historical records without `business_date` partitioning, and `is_active` partition could grow large over time.
 
 For high scalability and better performance in querying both active and historical records, **hybrid partitioning** is the most effective, though it does involve a bit more setup.
+
+
+Partitioning your PostgreSQL table by **monthly partitions based on the `business_date` field** can improve performance, especially for queries that filter by date ranges. However, it introduces some design and query changes. Let me walk through the adjustments.
+
+### 1. **Table Partitioning Design**
+
+You can use **range partitioning** on the `business_date` field to create monthly partitions. Each partition will store records for a specific month.
+
+#### Example:
+
+First, set up your main table as a partitioned table:
+
+```sql
+CREATE TABLE your_table (
+    id SERIAL PRIMARY KEY,
+    bca_reference_number VARCHAR,
+    facility_id VARCHAR,
+    valid_from TIMESTAMP NOT NULL,
+    valid_to TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE,
+    business_date DATE NOT NULL,  -- Date field for partitioning
+    -- other fields
+) PARTITION BY RANGE (business_date);
+```
+
+Then, create partitions for each month:
+
+```sql
+CREATE TABLE your_table_2024_09 PARTITION OF your_table
+FOR VALUES FROM ('2024-09-01') TO ('2024-10-01');
+
+CREATE TABLE your_table_2024_10 PARTITION OF your_table
+FOR VALUES FROM ('2024-10-01') TO ('2024-11-01');
+```
+
+### 2. **Impact on Indexes**
+
+Since each partition is a separate table, you need to create indexes on the partitions themselves. If you're still using a composite index on `bca_reference_number`, `facility_id`, and `is_active`, you must create it for each partition:
+
+```sql
+CREATE INDEX idx_bca_facility_active_2024_09 ON your_table_2024_09 (bca_reference_number, facility_id, is_active);
+CREATE INDEX idx_bca_facility_active_2024_10 ON your_table_2024_10 (bca_reference_number, facility_id, is_active);
+```
+
+### 3. **Inserting Data**
+
+The insert logic remains the same, but you’ll need to ensure the `business_date` is provided for partition routing:
+
+```sql
+INSERT INTO your_table (bca_reference_number, facility_id, valid_from, is_active, business_date, -- other fields)
+VALUES ('some_ref', 'some_facility', NOW(), TRUE, '2024-09-15', -- other values);
+```
+
+PostgreSQL will automatically route the data to the correct partition based on the `business_date`.
+
+### 4. **Updating Data**
+
+The update logic for closing a record remains the same, but it will target the correct partition based on the `business_date`. PostgreSQL will handle finding the correct partition, provided that the `business_date` is available in the `WHERE` clause:
+
+```sql
+UPDATE your_table
+SET valid_to = NOW(), is_active = FALSE
+WHERE bca_reference_number = 'some_ref' 
+  AND facility_id = 'some_facility'
+  AND is_active = TRUE
+  AND business_date = '2024-09-15';
+```
+
+### 5. **Fetching Active Records**
+
+When fetching active records, if you know the date range or the specific `business_date`, include it in your query for more efficient partition pruning:
+
+```sql
+SELECT *
+FROM your_table
+WHERE bca_reference_number = 'some_ref'
+  AND facility_id = 'some_facility'
+  AND is_active = TRUE
+  AND business_date = '2024-09-15';
+```
+
+PostgreSQL will route this query to the relevant partition (`your_table_2024_09`).
+
+### 6. **Fetching Records for a Specific Date**
+
+Similarly, when querying for records at a specific date, include the `business_date`:
+
+```sql
+SELECT *
+FROM your_table
+WHERE bca_reference_number = 'some_ref'
+  AND facility_id = 'some_facility'
+  AND valid_from <= '2024-09-01'
+  AND (valid_to IS NULL OR valid_to >= '2024-09-01')
+  AND business_date = '2024-09-01';
+```
+
+This query will be routed directly to the partition for September 2024.
+
+### 7. **Fetching the Trail of Changes**
+
+You can still fetch the historical trail by querying across partitions. PostgreSQL will search the appropriate partitions automatically:
+
+```sql
+SELECT *
+FROM your_table
+WHERE bca_reference_number = 'some_ref'
+  AND facility_id = 'some_facility'
+ORDER BY valid_from ASC;
+```
+
+### 8. **Partition Maintenance**
+
+You’ll need to regularly create new partitions (e.g., monthly) and drop old ones if historical data is no longer required. This can be automated using a script.
+
+### Conclusion
+
+- **Insert/Update Queries**: Minimal changes—just ensure the `business_date` is provided for routing.
+- **Fetching Queries**: For best performance, include the `business_date` to help PostgreSQL prune partitions.
+- **Indexes**: Indexes must be created on each partition separately.
+- **Partition Management**: New partitions need to be created periodically for incoming data.
+
+Partitioning, combined with appropriate indexes, can significantly improve performance, especially for time-based queries.
