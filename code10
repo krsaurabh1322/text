@@ -334,3 +334,80 @@ You’ll need to regularly create new partitions (e.g., monthly) and drop old on
 - **Partition Management**: New partitions need to be created periodically for incoming data.
 
 Partitioning, combined with appropriate indexes, can significantly improve performance, especially for time-based queries.
+
+
+&+++±-------+++++
+
+
+In the **hybrid approach** where you partition based on both `is_active` and `business_date`, the process of inserting data involves:
+
+1. **Closing the Active Record**: 
+   - First, you would find and update the currently active record, setting `is_active` to `false` and updating the `valid_to` field.
+   - This action will move the record from the **active partition** to the **historical partition**.
+
+2. **Inserting the New Record**: 
+   - Then, you insert the new record with `is_active = true`, which will place it into the **active partition**.
+
+### Example SQL Commands
+
+#### 1. **Update (Close the Active Record)**
+
+This query will find the currently active record (if it exists) based on the `bca_reference_number` and `facility_id` and close it by updating the `valid_to` field and setting `is_active = false`:
+
+```sql
+UPDATE your_table
+SET is_active = false,
+    valid_to = NOW()  -- or some other specific closing timestamp
+WHERE bca_reference_number = 'some_ref'
+  AND facility_id = 'some_facility'
+  AND is_active = true;
+```
+
+Once this update is done, PostgreSQL will automatically move this record to the **historical partition** (based on the partitioning rule `is_active = false`).
+
+#### 2. **Insert the New Record**
+
+Now, insert the new active record:
+
+```sql
+INSERT INTO your_table (bca_reference_number, facility_id, valid_from, is_active, other_columns)
+VALUES ('some_ref', 'some_facility', NOW(), true, other_values);
+```
+
+This new record, with `is_active = true`, will be inserted into the **active partition**.
+
+### Partitioning Logic
+
+- **Active Partition**: The partition for active records will hold entries with `is_active = true`.
+- **Historical Partition**: The historical partition will automatically contain records where `is_active = false`.
+
+### Example of the Partitioned Table Definition
+
+```sql
+CREATE TABLE your_table (
+    bca_reference_number TEXT,
+    facility_id TEXT,
+    valid_from TIMESTAMP,
+    valid_to TIMESTAMP DEFAULT NULL,
+    is_active BOOLEAN,
+    -- other columns
+    PRIMARY KEY (bca_reference_number, facility_id, valid_from)
+) PARTITION BY LIST (is_active);
+
+-- Create partitions for active and historical records
+
+CREATE TABLE active_records PARTITION OF your_table
+FOR VALUES IN (true);
+
+CREATE TABLE historical_records PARTITION OF your_table
+FOR VALUES IN (false)
+PARTITION BY RANGE (business_date);  -- Sub-partitioning by date
+```
+
+### Summary of the Workflow:
+
+1. **Update**: When you receive new data for the same `bca_reference_number` and `facility_id`, you first update the active record (if it exists) by closing it (setting `is_active = false` and updating `valid_to`).
+2. **Insert**: Insert the new record with `is_active = true`.
+3. **Partitioning**: PostgreSQL will automatically handle the placement of the record into either the **active** or **historical** partition based on the value of `is_active`.
+
+This ensures that your queries are optimized, and active records and historical records are stored efficiently.
