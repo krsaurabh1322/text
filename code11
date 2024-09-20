@@ -854,3 +854,111 @@ This should work with the real-time simulation and address the issue of the miss
 You could customize the polling frequency to read the file at intervals, or manage buffering in more sophisticated ways if you expect large amounts of real-time data.
 
 
+
+The error you're seeing indicates that Jet is disabled by default in the newer versions of Hazelcast (since it is now integrated with Hazelcast as of version 5). You need to explicitly enable Jet by modifying the Hazelcast configuration.
+
+To fix this, you can update your code to enable Jet in the configuration like this:
+
+### Updated Code with Jet Enabled:
+
+```java
+import com.hazelcast.config.Config;
+import com.hazelcast.jet.Jet;
+import com.hazelcast.jet.JetInstance;
+import com.hazelcast.jet.config.JetConfig;
+import com.hazelcast.jet.pipeline.Pipeline;
+import com.hazelcast.jet.pipeline.StreamSource;
+import com.hazelcast.jet.pipeline.Sinks;
+import com.hazelcast.jet.pipeline.WindowDefinition;
+import com.hazelcast.jet.pipeline.file.FileSources;
+import com.hazelcast.jet.aggregate.AggregateOperations;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+
+public class HazelcastJetFileSourceTumblingWindowDemo {
+
+    public static void main(String[] args) throws InterruptedException {
+        // Create Hazelcast configuration and enable Jet
+        Config config = new Config();
+        config.getJetConfig().setEnabled(true);  // Enable Jet explicitly
+
+        // Start Hazelcast Jet instance
+        JetInstance jet = Jet.newJetInstance(config);
+
+        // Build the pipeline
+        Pipeline pipeline = buildPipeline();
+
+        // Run the job
+        jet.newJob(pipeline).join();
+
+        // Shutdown the Jet instance
+        jet.shutdown();
+    }
+
+    // Build the pipeline with file source and map transformation
+    private static Pipeline buildPipeline() {
+        Pipeline pipeline = Pipeline.create();
+
+        // Create the file source
+        StreamSource<String> fileSource = FileSources
+                .files("transactions")
+                .charset(StandardCharsets.UTF_8)
+                .buildWatcher(Duration.ofSeconds(1));  // File watcher to continuously watch file updates
+
+        // Tumbling window aggregation
+        pipeline.readFrom(fileSource)
+            .withoutTimestamps()  // Using the default time tracking mechanism (wall-clock time)
+            .map(line -> {
+                // Split the line into parts (assume CSV format: name, amount)
+                String[] parts = line.split(",");
+                String name = parts[0];
+                double amount = Double.parseDouble(parts[1]);
+                // Return a new Transaction object
+                return new Transaction(name, amount);
+            })
+            .setName("File Source")
+            // Perform a tumbling window aggregation
+            .window(WindowDefinition.tumbling(Duration.ofMinutes(1)))  // Tumbling window of 1 minute
+            .aggregate(AggregateOperations.summingDouble(Transaction::getAmount))
+            .setName("Tumbling Window Aggregation")
+            // Write the results to the logger
+            .writeTo(Sinks.logger());
+
+        return pipeline;
+    }
+
+    // Transaction class to hold name and amount
+    static class Transaction {
+        private final String name;
+        private final double amount;
+
+        public Transaction(String name, double amount) {
+            this.name = name;
+            this.amount = amount;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public double getAmount() {
+            return amount;
+        }
+    }
+}
+```
+
+### Explanation of Changes:
+1. **Enable Jet in Hazelcast Configuration**:
+   - Use `config.getJetConfig().setEnabled(true)` to enable Jet explicitly when using the Hazelcast 5.x library.
+   
+2. **Configuration for Hazelcast Jet**:
+   - We created a `Config` object and enabled Jet using the `JetConfig` section.
+   - Passed this configuration to the `Jet.newJetInstance(config)` method to start the instance with Jet enabled.
+
+Now, when you run the code, Jet will be enabled and it should work as expected.
+
+Let me know if you encounter any other issues!
+
+
