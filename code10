@@ -603,3 +603,7 @@ VALUES ('some_ref', 'some_facility', '2024-09-01 00:00:00', '2024-09-30 23:59:59
 - **Partitioning**: Partitioning by `is_active` ensures efficient management of active vs. historical records.
 
 This approach provides a way to manage records efficiently while tracking changes using hashes of all relevant fields.
+
+
+
+db.myCollection.aggregate([ { $match: {} }, { $out: "myCollection_backup" } ])
