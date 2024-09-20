@@ -411,3 +411,100 @@ PARTITION BY RANGE (business_date);  -- Sub-partitioning by date
 3. **Partitioning**: PostgreSQL will automatically handle the placement of the record into either the **active** or **historical** partition based on the value of `is_active`.
 
 This ensures that your queries are optimized, and active records and historical records are stored efficiently.
+
+
+
+
+If you need to calculate a hash on all columns, including numeric fields, you should handle each type of column properly in the hash function to ensure consistent and accurate hashing. Numeric fields, in particular, should be converted to a consistent format before hashing to avoid discrepancies.
+
+Here’s how to approach hashing all columns:
+
+### Updated Hash Calculation Function
+
+1. **Hash Function Definition**: Ensure all columns are converted to a consistent string format before hashing. For numeric fields, use a consistent representation.
+
+```sql
+-- Define a function to compute a hash of all relevant fields, including numeric fields
+CREATE OR REPLACE FUNCTION compute_record_hash(
+    bca_reference_number VARCHAR,
+    facility_id VARCHAR,
+    valid_from TIMESTAMP,
+    valid_to TIMESTAMP,
+    is_active BOOLEAN
+) RETURNS TEXT AS $$
+BEGIN
+    RETURN md5(
+        COALESCE(bca_reference_number, '') || 
+        COALESCE(facility_id, '') || 
+        COALESCE(valid_from::text, '') || 
+        COALESCE(valid_to::text, '') || 
+        COALESCE(is_active::text, '')
+    );
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### Example Insert and Update Commands
+
+#### 1. **Update Existing Records**
+
+Check if the new record's hash is different and then update the existing record:
+
+```sql
+-- Update existing active records if the hash has changed
+UPDATE your_table
+SET is_active = FALSE
+WHERE bca_reference_number = 'some_ref'
+  AND facility_id = 'some_facility'
+  AND is_active = TRUE
+  AND record_hash != compute_record_hash(
+      'some_ref',
+      'some_facility',
+      '2024-09-01 00:00:00',
+      '2024-09-30 23:59:59',
+      TRUE
+  );
+```
+
+#### 2. **Insert New Record**
+
+Insert the new record with a computed hash:
+
+```sql
+-- Insert new record
+INSERT INTO your_table (
+    bca_reference_number, 
+    facility_id, 
+    valid_from, 
+    valid_to, 
+    record_hash, 
+    is_active
+) VALUES (
+    'some_ref', 
+    'some_facility', 
+    '2024-09-01 00:00:00', 
+    '2024-09-30 23:59:59', 
+    compute_record_hash(
+        'some_ref', 
+        'some_facility', 
+        '2024-09-01 00:00:00', 
+        '2024-09-30 23:59:59', 
+        TRUE
+    ), 
+    TRUE
+);
+```
+
+### Considerations
+
+1. **Data Type Conversion**: Convert all fields to a string representation before hashing to ensure that numeric and other types are consistently handled. Using `::text` for numeric fields is a common practice.
+
+2. **Hashing Consistency**: Ensure that the hash function is consistently applied across all fields to avoid discrepancies. For complex types or large text fields, ensure that their representation does not change unexpectedly.
+
+3. **Indexing**: Index the columns used in the hash calculation to optimize query performance, particularly `bca_reference_number`, `facility_id`, and `record_hash`.
+
+4. **Hashing Function**: `md5` is a common choice for hashing but consider using a more robust hash function if security is a concern.
+
+### Summary
+
+By converting all columns to a consistent string format and hashing them, you ensure that the hash accurately represents the entire row. This approach allows you to detect changes across all fields, including numeric ones, and manage active vs. historical records effectively.
