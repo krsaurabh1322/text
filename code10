@@ -508,3 +508,98 @@ INSERT INTO your_table (
 ### Summary
 
 By converting all columns to a consistent string format and hashing them, you ensure that the hash accurately represents the entire row. This approach allows you to detect changes across all fields, including numeric ones, and manage active vs. historical records effectively.
+
+
+
+
+
+
+If you want to hash all relevant fields to track changes and manage active vs. historical records, you can use a similar approach but calculate the hash based on all relevant fields in the record. Here’s how to structure your design and commands:
+
+### Schema Design
+
+The table schema includes a `record_hash` column to store the hash of all relevant fields.
+
+```sql
+-- Main table partitioned by is_active
+CREATE TABLE your_table (
+    id SERIAL PRIMARY KEY,
+    bca_reference_number VARCHAR NOT NULL,
+    facility_id VARCHAR NOT NULL,
+    valid_from TIMESTAMP NOT NULL,
+    valid_to TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE,
+    record_hash TEXT NOT NULL -- Store hash of all relevant fields
+) PARTITION BY LIST (is_active);
+
+-- Partition for active records
+CREATE TABLE active_records PARTITION OF your_table
+FOR VALUES IN (TRUE);
+
+-- Partition for historical records
+CREATE TABLE historical_records PARTITION OF your_table
+FOR VALUES IN (FALSE);
+```
+
+### Hash Calculation Function
+
+Define a function to compute the hash based on all relevant fields. You can use `md5` or another hashing function suitable for your needs.
+
+```sql
+-- Define a function to compute a hash of all relevant fields
+CREATE OR REPLACE FUNCTION compute_record_hash(
+    bca_reference_number VARCHAR,
+    facility_id VARCHAR,
+    valid_from TIMESTAMP,
+    valid_to TIMESTAMP
+) RETURNS TEXT AS $$
+BEGIN
+    RETURN md5(bca_reference_number || facility_id || COALESCE(valid_from::text, '') || COALESCE(valid_to::text, ''));
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### Commands for Updating and Inserting Records
+
+#### 1. **Update Existing Records**
+
+Update existing active records if their hash differs:
+
+```sql
+-- Update existing active records
+UPDATE your_table
+SET is_active = FALSE
+WHERE bca_reference_number = 'some_ref'
+  AND facility_id = 'some_facility'
+  AND is_active = TRUE
+  AND record_hash != compute_record_hash('some_ref', 'some_facility', '2024-09-01 00:00:00', '2024-09-30 23:59:59');
+```
+
+#### 2. **Insert New Record**
+
+After updating the existing records, insert the new record:
+
+```sql
+-- Insert new record
+INSERT INTO your_table (bca_reference_number, facility_id, valid_from, valid_to, record_hash, is_active)
+VALUES ('some_ref', 'some_facility', '2024-09-01 00:00:00', '2024-09-30 23:59:59', compute_record_hash('some_ref', 'some_facility', '2024-09-01 00:00:00', '2024-09-30 23:59:59'), TRUE);
+```
+
+### Summary
+
+1. **Hash Calculation**:
+   - The `compute_record_hash` function calculates a hash based on all relevant fields in the record.
+   
+2. **Update Existing Records**:
+   - The `UPDATE` statement sets `is_active` to `FALSE` for records where the hash differs, indicating a change.
+
+3. **Insert New Record**:
+   - The `INSERT` statement adds the new record with a computed hash and sets `is_active` to `TRUE`.
+
+### Performance Considerations
+
+- **Hash Function**: Ensure the hash function is efficient and minimizes collisions. `md5` is commonly used, but you might choose another hash function based on your security and performance requirements.
+- **Indexes**: Index `bca_reference_number`, `facility_id`, and `record_hash` to optimize queries and updates.
+- **Partitioning**: Partitioning by `is_active` ensures efficient management of active vs. historical records.
+
+This approach provides a way to manage records efficiently while tracking changes using hashes of all relevant fields.
