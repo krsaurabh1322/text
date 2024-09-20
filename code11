@@ -1,0 +1,549 @@
+Here is the full code for your project, including the required `pom.xml` for Maven, to run Hazelcast Jet in a standalone cluster. This will allow you to demonstrate real-time low-latency stream processing with dynamic SQL query recalculation.
+
+### Full Project Setup
+
+#### 1. `pom.xml`
+
+This `pom.xml` file includes the necessary dependencies for Hazelcast Jet, SQL support, and logging.
+
+```xml
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example</groupId>
+    <artifactId>hazelcast-jet-demo</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+    </properties>
+
+    <dependencies>
+        <!-- Hazelcast Jet dependency -->
+        <dependency>
+            <groupId>com.hazelcast.jet</groupId>
+            <artifactId>hazelcast-jet</artifactId>
+            <version>5.3</version>
+        </dependency>
+
+        <!-- Hazelcast Jet SQL support -->
+        <dependency>
+            <groupId>com.hazelcast.jet</groupId>
+            <artifactId>hazelcast-jet-sql</artifactId>
+            <version>5.3</version>
+        </dependency>
+
+        <!-- SLF4J API and Simple Logger (for logging) -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>1.7.32</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>1.7.32</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.8.1</version>
+                <configuration>
+                    <source>11</source>
+                    <target>11</target>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+```
+
+#### 2. Java Code
+
+The following Java class sets up a Hazelcast Jet standalone instance, defines a continuous file stream using a Jet pipeline, and dynamically runs SQL queries to recalculate totals.
+
+#### `HazelcastJetSQLStreamingDemo.java`
+
+```java
+import com.hazelcast.jet.Jet;
+import com.hazelcast.jet.JetInstance;
+import com.hazelcast.jet.pipeline.Pipeline;
+import com.hazelcast.jet.pipeline.Sinks;
+import com.hazelcast.jet.pipeline.file.FileSources;
+import com.hazelcast.jet.sql.SqlResult;
+import com.hazelcast.sql.SqlRow;
+
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.concurrent.TimeUnit;
+
+public class HazelcastJetSQLStreamingDemo {
+
+    public static void main(String[] args) throws Exception {
+        // Start Hazelcast Jet standalone instance
+        JetInstance jet = Jet.newJetInstance();
+
+        try {
+            // Create a pipeline for continuous stream processing from a file
+            Pipeline pipeline = createPipeline();
+
+            // Submit the pipeline job to Hazelcast Jet
+            jet.newJob(pipeline);
+
+            // Continuously execute the SQL query to recalculate as new data arrives
+            while (true) {
+                System.out.println("Executing SQL query...");
+                String query = "SELECT name, SUM(amount) AS totalAmount FROM fileStream " +
+                        "WHERE amount > 50 " +
+                        "GROUP BY name";
+
+                try (SqlResult result = jet.getSql().execute(query)) {
+                    System.out.println("Updated results:");
+                    for (SqlRow row : result) {
+                        System.out.println(row);
+                    }
+                }
+
+                // Poll for new data every 10 seconds (adjust this as needed)
+                TimeUnit.SECONDS.sleep(10);
+            }
+        } finally {
+            // Shutdown Jet instance after job completion
+            Jet.shutdownAll();
+        }
+    }
+
+    // Create a pipeline to continuously read from file and perform stream processing
+    private static Pipeline createPipeline() {
+        Pipeline pipeline = Pipeline.create();
+
+        // Define file source for the pipeline (Simulating a continuously updated file)
+        Path filePath = Paths.get("data/transactions.txt");
+        pipeline.readFrom(FileSources.files(filePath.toString())
+                        .tail())  // Enable tailing for continuous file monitoring
+                .map(line -> {
+                    String[] parts = line.split(",");
+                    return new Transaction(parts[0], Double.parseDouble(parts[1]));
+                })
+                .setName("File Source")
+                .writeTo(Sinks.logger());  // Writing to logger just to visualize the stream
+
+        return pipeline;
+    }
+
+    // Transaction class to hold data from the stream
+    static class Transaction {
+        String name;
+        double amount;
+
+        Transaction(String name, double amount) {
+            this.name = name;
+            this.amount = amount;
+        }
+
+        @Override
+        public String toString() {
+            return "Transaction{" + "name='" + name + '\'' + ", amount=" + amount + '}';
+        }
+    }
+}
+```
+
+#### 3. Directory Structure
+
+Create a file structure that looks like this:
+
+```
+hazelcast-jet-demo/
+ ├── data/
+ │    └── transactions.txt     # This is your data file
+ ├── src/
+ │    └── main/
+ │        └── java/
+ │            └── HazelcastJetSQLStreamingDemo.java
+ └── pom.xml
+```
+
+#### 4. Sample Data File (`data/transactions.txt`)
+
+Create a file called `transactions.txt` in the `data` directory to simulate a data stream. This file will be continuously updated as Jet processes the pipeline.
+
+```txt
+Alice,120.50
+Bob,75.00
+Alice,30.00
+Bob,90.00
+Charlie,45.00
+```
+
+You can append more data to this file during your demo to simulate dynamic real-time data processing.
+
+#### 5. Running the Application
+
+1. **Build the project**:
+   - In your project directory (`hazelcast-jet-demo`), run the following Maven command to build the project:
+     ```bash
+     mvn clean install
+     ```
+
+2. **Run the application**:
+   - After the project is built, you can run the Java application using:
+     ```bash
+     mvn exec:java -Dexec.mainClass="HazelcastJetSQLStreamingDemo"
+     ```
+
+   - This will start the Hazelcast Jet instance, run the pipeline to monitor the `transactions.txt` file, and continuously run the SQL query to recalculate the results dynamically as new data is appended to the file.
+
+3. **Append data during the demo**:
+   - During the demo, you can manually append more data to `data/transactions.txt`:
+     ```txt
+     Charlie,60.00
+     Alice,70.00
+     Bob,55.00
+     ```
+
+   - The results will automatically be recalculated every 10 seconds based on the new data.
+
+#### 6. Expected Output
+
+As you append new data to the file, you will see output like:
+
+```txt
+Executing SQL query...
+Updated results:
+name='Alice', totalAmount=120.50
+name='Bob', totalAmount=165.00
+
+Executing SQL query...
+Updated results:
+name='Alice', totalAmount=190.50
+name='Bob', totalAmount=220.00
+name='Charlie', totalAmount=60.00
+```
+
+### Conclusion
+
+This project will allow you to showcase real-time low-latency stream processing using Hazelcast Jet's pipeline and SQL. The file-based stream source simulates continuous incoming data, and Jet's SQL queries dynamically recalculate the results.
+
+_----_-----------
+
+
+Good observation! Let's address both of your concerns:
+
+1. **Windowing:**
+   The current example does not implement any windowing. Hazelcast Jet supports windowing for streams, but it's not explicitly shown in this pipeline. If you want to perform windowed aggregations (e.g., calculating totals or averages over a fixed period of time or based on event count), we can add windowing in the pipeline.
+
+2. **Why We Use a Loop (`while (true)`):**
+   In the current implementation, I used a `while (true)` loop to simulate periodic SQL execution. This is because Jet's SQL engine doesn’t automatically trigger queries based on new data. However, this approach is not the most efficient way to monitor dynamic changes, as you correctly pointed out. 
+
+To solve both the windowing issue and the redundant loop, we can leverage Hazelcast Jet's windowing mechanism directly within the pipeline, which will continuously trigger operations as new data flows in.
+
+### Updated Version with Windowing and Self-Triggering
+
+Here’s the updated code to handle windowing and eliminate the `while (true)` loop:
+
+1. We'll define a **sliding window** in the pipeline that aggregates data over time.
+2. The results will update dynamically as new data enters the stream.
+
+### Updated Java Code with Windowing
+
+```java
+import com.hazelcast.jet.Jet;
+import com.hazelcast.jet.JetInstance;
+import com.hazelcast.jet.pipeline.Pipeline;
+import com.hazelcast.jet.pipeline.Sinks;
+import com.hazelcast.jet.pipeline.StreamSource;
+import com.hazelcast.jet.pipeline.WindowDefinition;
+import com.hazelcast.jet.pipeline.file.FileSources;
+import com.hazelcast.jet.sql.impl.connector.map.IMapSqlConnector;
+import com.hazelcast.jet.windowing.TumblingWindowPolicy;
+import com.hazelcast.jet.windowing.WindowingStrategies;
+
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.concurrent.TimeUnit;
+
+import static com.hazelcast.jet.aggregate.AggregateOperations.summingDouble;
+import static com.hazelcast.jet.pipeline.WindowDefinition.tumbling;
+
+public class HazelcastJetSQLWindowingDemo {
+
+    public static void main(String[] args) throws Exception {
+        // Start Hazelcast Jet standalone instance
+        JetInstance jet = Jet.newJetInstance();
+
+        try {
+            // Create a pipeline for stream processing with windowing
+            Pipeline pipeline = createPipeline();
+
+            // Submit the pipeline job to Hazelcast Jet
+            jet.newJob(pipeline).join();  // Use .join() to keep job running
+
+        } finally {
+            // Shutdown Jet instance after job completion
+            Jet.shutdownAll();
+        }
+    }
+
+    // Create a pipeline to read from a file and apply windowing for stream processing
+    private static Pipeline createPipeline() {
+        Pipeline pipeline = Pipeline.create();
+
+        // Define file source (Simulating a continuously updated file stream)
+        Path filePath = Paths.get("data/transactions.txt");
+        StreamSource<String> fileSource = FileSources.files(filePath.toString()).tail();
+
+        // Define a tumbling window of 10 seconds (adjust as needed)
+        WindowDefinition windowDef = tumbling(TimeUnit.SECONDS.toMillis(10));
+
+        pipeline.readFrom(fileSource)
+                .map(line -> {
+                    String[] parts = line.split(",");
+                    String name = parts[0];
+                    double amount = Double.parseDouble(parts[1]);
+                    return new Transaction(name, amount);
+                })
+                .setName("File Source")
+
+                // Windowing step: aggregate the data using tumbling window
+                .groupingKey(Transaction::getName)
+                .window(windowDef)
+                .aggregate(summingDouble(Transaction::getAmount))
+
+                // Sink to logger to visualize the windowed results
+                .writeTo(Sinks.logger());
+
+        return pipeline;
+    }
+
+    // Transaction class to hold data from the stream
+    static class Transaction {
+        String name;
+        double amount;
+
+        Transaction(String name, double amount) {
+            this.name = name;
+            this.amount = amount;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public double getAmount() {
+            return amount;
+        }
+
+        @Override
+        public String toString() {
+            return "Transaction{" + "name='" + name + '\'' + ", amount=" + amount + '}';
+        }
+    }
+}
+```
+
+### Explanation of Changes
+
+1. **Windowing:**
+   - The pipeline now defines a **tumbling window** using `tumbling(TimeUnit.SECONDS.toMillis(10))`. This means the data is aggregated in 10-second intervals.
+   - Each window collects data within that time frame and recalculates aggregates dynamically as new data arrives.
+
+2. **Self-Triggering Pipeline:**
+   - The `jet.newJob(pipeline).join();` command starts the job and keeps it running. The pipeline will now **automatically react** to any updates in the source (the file).
+   - As new data is appended to the file, the pipeline will continuously read the new data and update the aggregates within the defined window.
+
+### Eliminating the `while(true)` Loop:
+The windowing mechanism takes care of the continuous monitoring and recalculations, so there's no need to manually execute SQL queries in a loop. The pipeline itself will trigger recalculations every 10 seconds, or you can adjust the window interval as needed.
+
+### Conclusion:
+This updated version solves both of your concerns by:
+1. Implementing a sliding/tumbling window to recalculate results as new data arrives.
+2. Removing the need for a manual loop by making the pipeline self-triggering based on the windowed stream processing mechanism.
+
+Now, your demo will dynamically show real-time data being processed as you append new entries to the `transactions.txt` file, with Hazelcast Jet recalculating results based on windowing logic.
+
+
+
+_______&&&&&&&&&&________
+
+
+To achieve what you're asking—continuously summing up the total money spent by Alice from the start of the day while displaying the output in a **minute-based window**—you'll need to do a **cumulative aggregation** across the entire stream (from the start of the day). This requires keeping a running total for each user and displaying intermediate results at regular intervals (such as every minute).
+
+### Steps to Implement:
+1. **Continuous Aggregation**: Instead of resetting the aggregation at each window, you will keep a **cumulative sum** for each user.
+2. **Periodic Emission**: Use a **sliding window** or **custom logic** to emit the current total at regular intervals (e.g., every minute).
+3. **Hazelcast Jet's Stateful Aggregation**: Jet allows for **stateful processing** where you can maintain the running total for each user.
+
+Here’s how you can modify the code to achieve this.
+
+---
+
+### 1. **Cumulative Aggregation from the Start of the Day**
+To keep a running total of money spent by each user since the start of the day, you will:
+- Maintain a **stateful aggregation** in Hazelcast Jet.
+- Periodically emit the results (e.g., every minute).
+
+### 2. **Pipeline Example**
+
+Here’s how the pipeline changes to support this requirement:
+
+#### Code:
+
+```java
+import com.hazelcast.jet.Jet;
+import com.hazelcast.jet.JetInstance;
+import com.hazelcast.jet.pipeline.*;
+import com.hazelcast.function.FunctionEx;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+public class CumulativeAggregation {
+    public static void main(String[] args) {
+        // Start a Hazelcast Jet cluster member
+        JetInstance jet = Jet.newJetInstance();
+
+        try {
+            // Build the pipeline
+            Pipeline pipeline = Pipeline.create();
+
+            // Simulate transactions from a file stream (transaction.txt)
+            StreamSource<String> source = Sources.fileWatcher("transactions.txt");
+
+            // Define the pipeline
+            pipeline.readFrom(source)
+                    .withoutTimestamps()
+                    .map(line -> Transaction.parse(line))  // Parse the input stream
+                    .groupingKey(Transaction::getUser)     // Group by user (e.g., Alice)
+                    .aggregate(AggregateOperations.summingDouble(Transaction::getAmount))  // Cumulative aggregation
+                    .window(WindowDefinition.sliding(60000, 1000)) // Emit every minute
+                    .writeTo(Sinks.logger());               // Write output to log
+
+            // Run the job
+            jet.newJob(pipeline).join();
+        } finally {
+            Jet.shutdownAll();
+        }
+    }
+
+    // Define the Transaction class
+    static class Transaction {
+        private String user;
+        private double amount;
+
+        // Constructor and getter methods
+        public Transaction(String user, double amount) {
+            this.user = user;
+            this.amount = amount;
+        }
+
+        public String getUser() {
+            return user;
+        }
+
+        public double getAmount() {
+            return amount;
+        }
+
+        // Parse a line from the transaction file (e.g., "Alice, 10.5")
+        public static Transaction parse(String line) {
+            String[] parts = line.split(",");
+            return new Transaction(parts[0].trim(), Double.parseDouble(parts[1].trim()));
+        }
+    }
+}
+```
+
+#### Explanation of Changes:
+1. **Continuous Cumulative Sum**:
+   - We aggregate the sum for each user using `AggregateOperations.summingDouble()`, which keeps accumulating new values for each user.
+   
+2. **Sliding Window**:
+   - `.window(WindowDefinition.sliding(60000, 1000))`: This creates a **sliding window** with a window size of 1 minute (`60000 milliseconds`) and a sliding interval of 1 second (`1000 milliseconds`). 
+   - This means that every second, Jet will emit the current sum from the start of the day and display it.
+
+3. **Periodic Emission**:
+   - This setup makes the pipeline **self-triggering**: it emits the sum every second but aggregates the data cumulatively over the entire day.
+   
+4. **Stateful Aggregation**:
+   - Jet stores the state (sum of amounts) for each user and keeps adding new transactions as they arrive. Each time a new result is emitted, it includes the sum from the start of the day.
+
+---
+
+### 3. **Diagram of Flow**
+
+You can explain the flow in your presentation with a diagram like this:
+
+#### **Cumulative Aggregation Flow:**
+```
+                         Transaction Stream
+                             |   |
+                          [Alice, $10]
+                             |   |
+                        +--------------+
+                        | Group by User|    (Keyed by user)
+                        +--------------+
+                             |   |
+                 +-----------+-----------+
+                 |                       |
+            [Aggregate: SUM]          [Sliding Window: 1 min]
+                (Cumulative)                (Emit every second)
+                 |                           |
+            Running Total               Emit: [Alice: $10]
+            (Sum updated with new values)    
+                 |
+            +------------------+
+            | New Transaction   |
+            +------------------+
+                 |                           |
+            Running Total               Emit: [Alice: $15]
+                 |                           |
+            +------------------+
+            | Further Updates   |
+            +------------------+
+```
+
+---
+
+### 4. **Slide Explanation**
+
+For your presentation, you can explain this process in the following way:
+
+#### Slide 1: **Cumulative Aggregation**
+- **Goal**: Keep a running total of amounts spent per user from the start of the day.
+- **Cumulative Aggregation**: Hazelcast Jet updates a **stateful sum** for each user. The sum is never reset but continues to grow as new transactions arrive.
+  
+---
+
+#### Slide 2: **Periodic Emission with Sliding Window**
+- **Sliding Window**: Jet emits the current total every second while keeping the cumulative sum from the start.
+- **Window Size**: 1 minute (60 seconds).
+- **Sliding Interval**: 1 second.
+- **Example**:
+   - Transactions from Alice: `$10`, `$5`, `$8`.
+   - At each second, we get:
+     - Time 0-59 sec: Sum = `$10`.
+     - Time 60-119 sec: Sum = `$15`.
+     - Time 120-179 sec: Sum = `$23`.
+
+---
+
+### 5. **Conclusion**
+
+This approach is ideal when:
+- You need to maintain a **continuous, cumulative total** from the start of the day.
+- Results are needed periodically (e.g., every minute or every second).
+- Jet's stateful processing allows for efficient incremental aggregation over large streams of data, and the sliding window allows periodic updates to be emitted without resetting the sum.
+
+Let me know if you'd like help with further details or the presentation slides!
+
+
+
+
