@@ -716,3 +716,141 @@ This updated demo should now meet your requirements for Hazelcast 5.x. Let me kn
 
 
 
+You're right! I apologize for the confusion. The `fileWatcher()` method I mentioned earlier does not exist in Hazelcast Jet. To simulate real-time file reading in Hazelcast 5.x (or Jet), we can instead simulate a data stream by polling the file source continuously.
+
+In the absence of `fileWatcher()`, the alternative is to simulate file streaming by reading from a file and keeping track of the last position, appending new lines in a loop (using a `while(true)` loop). Let's adjust the pipeline and code to continuously read from the file and process new lines as they're appended.
+
+### Updated Approach:
+
+We will manually track new lines added to the file and process them through the pipeline. This setup will read the file periodically, and if there are new lines appended, they will be processed.
+
+### Code Example
+
+```java
+import com.hazelcast.core.Hazelcast;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.jet.Jet;
+import com.hazelcast.jet.JetInstance;
+import com.hazelcast.jet.Job;
+import com.hazelcast.jet.config.JobConfig;
+import com.hazelcast.jet.pipeline.*;
+import com.hazelcast.jet.windowing.TumblingWindowPolicy;
+
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
+
+public class HazelcastJetFileSourceDemo {
+
+    public static void main(String[] args) throws InterruptedException, IOException {
+        // Start Hazelcast instance
+        HazelcastInstance hz = Hazelcast.newHazelcastInstance();
+
+        // Define the pipeline
+        Pipeline pipeline = buildPipeline();
+
+        // Configure the job
+        JobConfig jobConfig = new JobConfig();
+        jobConfig.setName("ExpenseAggregationJob");
+
+        // Start the job
+        Job job = hz.getJet().newJob(pipeline, jobConfig);
+
+        // Simulate real-time file data updates
+        simulateFileDataStream();
+
+        // Keep the job running for a certain amount of time
+        TimeUnit.MINUTES.sleep(10);
+
+        // Shut down Hazelcast
+        hz.shutdown();
+    }
+
+    // Build the pipeline with Tumbling Window reading from file source
+    private static Pipeline buildPipeline() {
+        Pipeline pipeline = Pipeline.create();
+
+        // Set up the source to read from file and process new lines
+        StreamSource<String> source = SourceBuilder
+                .stream("file-source", ctx -> new BufferedReader(new FileReader("transactions")))
+                .<String>fillBufferFn((reader, buffer) -> {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        buffer.add(line);
+                    }
+                })
+                .build();
+
+        // Define the pipeline that reads from the file and does tumbling window aggregation
+        pipeline
+            .readFrom(source)
+            .withTimestamps(item -> System.currentTimeMillis(), 1000)  // Assigning timestamps
+            .window(WindowDefinition.tumbling(Duration.ofMinutes(1)))  // Use Tumbling window policy (1 minute)
+            .groupingKey(transaction -> extractUserFromTransaction(transaction)) // Group by user from transaction
+            .aggregate(AggregateOperations.summingDouble(transaction -> extractAmountFromTransaction(transaction)))  // Aggregate: sum the transaction amounts
+            .writeTo(Sinks.logger());  // Output the results to the logger
+
+        return pipeline;
+    }
+
+    // Simulate real-time data appending to the file
+    private static void simulateFileDataStream() throws IOException {
+        File file = new File("transactions");
+        BufferedWriter writer = new BufferedWriter(new FileWriter(file, true)); // Append mode
+
+        // Simulate 100 transactions being added over time
+        new Thread(() -> {
+            try {
+                for (int i = 0; i < 100; i++) {
+                    // Simulate 10 users with random transaction amounts
+                    String transaction = "user" + (i % 10) + "," + (Math.random() * 100) + "\n";
+                    writer.write(transaction);
+                    writer.flush();
+                    Thread.sleep(1000);  // Add a new transaction every second
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+
+    // Helper method to extract user from a transaction line
+    private static String extractUserFromTransaction(String transaction) {
+        String[] parts = transaction.split(",");
+        return parts[0];  // First part is the user ID
+    }
+
+    // Helper method to extract amount from a transaction line
+    private static double extractAmountFromTransaction(String transaction) {
+        String[] parts = transaction.split(",");
+        return Double.parseDouble(parts[1]);  // Second part is the transaction amount
+    }
+}
+```
+
+### Key Changes:
+
+1. **Custom File Reader with `SourceBuilder`**:
+   - We're using `SourceBuilder` to create a custom source that reads from the `transactions` file.
+   - This source reads any new lines appended to the file each time it's polled.
+
+2. **Polling for New Data**:
+   - The pipeline continuously reads the file, simulating real-time data ingestion. It will pick up any new lines added to the file.
+
+3. **Simulated Data Append**:
+   - We're still using a background thread to simulate appending new transaction lines to the `transactions` file in real-time.
+
+### What’s Happening:
+- The file is polled for new lines, and any new data is streamed into the pipeline.
+- The tumbling window aggregates transaction amounts for each user over 1-minute windows.
+- Aggregated results are printed to the logger.
+
+This should work with the real-time simulation and address the issue of the missing `tail()` method in Hazelcast 5.x.
+
+### Further Refinements:
+
+You could customize the polling frequency to read the file at intervals, or manage buffering in more sophisticated ways if you expect large amounts of real-time data.
+
+
