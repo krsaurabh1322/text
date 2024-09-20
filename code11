@@ -962,3 +962,106 @@ Now, when you run the code, Jet will be enabled and it should work as expected.
 Let me know if you encounter any other issues!
 
 
+
+You can start a Hazelcast server (also known as a Hazelcast member) through a Java `main` method just like you run the Jet client. Hazelcast provides APIs to programmatically start a standalone member (server), which can then be used to execute distributed Jet jobs or other Hazelcast features.
+
+Here's how you can create a Java `main` method to start a Hazelcast server:
+
+### 1. Include Hazelcast in Your Maven `pom.xml`
+
+Add the following dependency to your `pom.xml` file:
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>com.hazelcast</groupId>
+        <artifactId>hazelcast</artifactId>
+        <version>5.5</version>
+    </dependency>
+    <dependency>
+        <groupId>com.hazelcast</groupId>
+        <artifactId>hazelcast-jet</artifactId>
+        <version>5.5</version>
+    </dependency>
+</dependencies>
+```
+
+### 2. Create the Java Main Class for the Hazelcast Server
+
+You can use the Hazelcast API to create and configure a server instance (also called a Hazelcast member).
+
+Here’s an example that programmatically starts a Hazelcast member:
+
+```java
+import com.hazelcast.config.Config;
+import com.hazelcast.core.Hazelcast;
+import com.hazelcast.core.HazelcastInstance;
+
+public class HazelcastServerDemo {
+
+    public static void main(String[] args) {
+        // Create a configuration for the Hazelcast instance
+        Config config = new Config();
+        
+        // Optionally, customize the configuration here (e.g., network settings, map configs, etc.)
+
+        // Start the Hazelcast instance (this acts as a standalone member or server)
+        HazelcastInstance hazelcastInstance = Hazelcast.newHazelcastInstance(config);
+
+        System.out.println("Hazelcast Server is running...");
+    }
+}
+```
+
+### 3. Running the Hazelcast Server
+
+You can now run this `HazelcastServerDemo` class to start the server.
+
+### 4. Explanation of the Code:
+- **Hazelcast Config**: You can configure the server using the `Config` object. This could include network settings, distributed data structures, map configurations, etc. By default, Hazelcast runs on port `5701` and forms a cluster if other members are available.
+  
+- **HazelcastInstance**: Calling `Hazelcast.newHazelcastInstance(config)` starts a new Hazelcast member. This member will act as a server in the Hazelcast cluster and can process Jet jobs, store distributed data, and perform other Hazelcast operations.
+
+### 5. Using Jet Features
+To run Hazelcast Jet features, your Hazelcast server needs to have Jet enabled. In recent versions (Hazelcast 5.x+), Jet is integrated into the core of Hazelcast, so no separate Jet configuration is required.
+
+You can optionally check if Jet is enabled as follows:
+
+```java
+config.getJetConfig().setEnabled(true); // Jet is enabled by default in 5.x
+```
+
+This allows the Hazelcast server to act as a Jet job processor in addition to other distributed cache and data grid functionalities.
+
+### 6. Running a Jet Client
+Once the Hazelcast server is up and running, you can submit Jet jobs from the Jet client like this:
+
+```java
+import com.hazelcast.client.config.ClientConfig;
+import com.hazelcast.jet.Jet;
+import com.hazelcast.jet.JetClient;
+
+public class JetClientDemo {
+    public static void main(String[] args) {
+        // Configure the client to connect to Hazelcast member
+        ClientConfig clientConfig = new ClientConfig();
+        clientConfig.getNetworkConfig().addAddress("localhost:5701"); // The Hazelcast server address
+
+        // Create a JetClient instance
+        JetClient jetClient = Jet.newJetClient(clientConfig);
+
+        // Your pipeline logic goes here...
+
+        // Shutdown the client when done
+        jetClient.shutdown();
+    }
+}
+```
+
+### 7. Running the Setup
+- **Step 1**: Run the `HazelcastServerDemo` to start the server.
+- **Step 2**: Run the Jet client (e.g., `JetClientDemo`) to submit Jet jobs to the server.
+
+By following this approach, you are running Hazelcast as a standalone server in one process and interacting with it using the Jet client in a separate process. This setup is useful for distributed environments where Hazelcast members can scale independently from clients.
+
+
