@@ -546,4 +546,173 @@ Let me know if you'd like help with further details or the presentation slides!
 
 
 
+You're correct that in Hazelcast 5.x, the Jet library has been merged into the core Hazelcast platform, and the features like windowing and stream processing are now available via `com.hazelcast` libraries. I'll update the demo to use the appropriate imports from Hazelcast 5.3.6 and ensure that it uses `TumblingWindowPolicy`.
+
+Here’s the updated code snippet that demonstrates how to perform a sliding window aggregation with Hazelcast 5.x. I'll also ensure the necessary changes are reflected in the imports and other related components.
+
+### Updated `Demo.java`
+
+```java
+import com.hazelcast.core.Hazelcast;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.function.FunctionEx;
+import com.hazelcast.jet.Jet;
+import com.hazelcast.jet.Job;
+import com.hazelcast.jet.config.JobConfig;
+import com.hazelcast.jet.pipeline.Pipeline;
+import com.hazelcast.jet.pipeline.Sink;
+import com.hazelcast.jet.pipeline.Sinks;
+import com.hazelcast.jet.pipeline.StreamSource;
+import com.hazelcast.jet.pipeline.StreamSources;
+import com.hazelcast.jet.pipeline.WindowDefinition;
+
+import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+public class HazelcastJetDemo {
+    public static void main(String[] args) throws InterruptedException {
+        // Start the Hazelcast instance
+        HazelcastInstance hz = Hazelcast.newHazelcastInstance();
+
+        // Define the pipeline
+        Pipeline pipeline = buildPipeline();
+
+        // Create a job configuration
+        JobConfig jobConfig = new JobConfig();
+        jobConfig.setName("ExpenseAggregationJob");
+
+        // Start the job
+        Job job = hz.getJet().newJob(pipeline, jobConfig);
+
+        // Simulate data being added dynamically
+        simulateDataStream(hz);
+
+        // Wait indefinitely to keep the job running
+        TimeUnit.MINUTES.sleep(10);
+
+        // Shut down Hazelcast
+        hz.shutdown();
+    }
+
+    // Build the pipeline with Tumbling Window
+    private static Pipeline buildPipeline() {
+        Pipeline pipeline = Pipeline.create();
+
+        // Stream data from a map (simulating a real-time data source)
+        StreamSource<Map.Entry<Long, Double>> source = StreamSources.mapJournal("expenses", 
+            FunctionEx.identity(), JournalInitialPosition.START_FROM_OLDEST);
+
+        // Tumbling window aggregation
+        pipeline
+            .readFrom(source)
+            .withTimestamps(entry -> System.currentTimeMillis(), 1000)  // Extract timestamps from entries
+            .window(WindowDefinition.tumbling(Duration.ofSeconds(60)))  // Use Tumbling window policy (1 minute)
+            .groupingKey(Map.Entry::getKey)  // Group by user ID (key)
+            .aggregate(AggregateOperations.summingDouble(Map.Entry::getValue))  // Sum expenses for each user
+            .writeTo(Sinks.logger());  // Output to the logger sink
+
+        return pipeline;
+    }
+
+    // Simulate real-time expense data stream
+    private static void simulateDataStream(HazelcastInstance hz) {
+        Map<Long, Double> expenseMap = hz.getMap("expenses");
+
+        // Simulate expenses being added in real-time
+        new Thread(() -> {
+            try {
+                for (int i = 0; i < 100; i++) {
+                    expenseMap.put((long) i % 10, Math.random() * 100);  // Simulate 10 users with random expenses
+                    Thread.sleep(1000);  // Simulate new data every second
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }).start();
+    }
+}
+```
+
+### Explanation of Changes:
+1. **Tumbling Window Policy**: 
+   - In Hazelcast 5.x, we use `WindowDefinition.tumbling(Duration.ofSeconds(60))` to define a tumbling window of 60 seconds.
+   - This creates fixed-size, non-overlapping windows where each user’s expenses are summed per minute.
+
+2. **Source**: 
+   - We are using `StreamSources.mapJournal()` to simulate a real-time data source. 
+   - This can be replaced with any other real-time source like Kafka or file streams.
+  
+3. **Aggregation**: 
+   - We are aggregating expenses per user (using the key) in the tumbling window with `AggregateOperations.summingDouble()`.
+
+4. **Sink**: 
+   - We use `Sinks.logger()` to print the results to the console in this demo, but it can be replaced with any persistent sink like a database or a file.
+
+### Updated `pom.xml`
+
+```xml
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>hazelcast-jet-demo</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <dependencies>
+        <!-- Hazelcast Core -->
+        <dependency>
+            <groupId>com.hazelcast</groupId>
+            <artifactId>hazelcast</artifactId>
+            <version>5.3.6</version>
+        </dependency>
+
+        <!-- Hazelcast Jet -->
+        <dependency>
+            <groupId>com.hazelcast</groupId>
+            <artifactId>hazelcast-jet</artifactId>
+            <version>5.3.6</version>
+        </dependency>
+
+        <!-- Logging dependencies -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>1.7.30</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>1.7.30</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.8.0</version>
+                <configuration>
+                    <source>11</source>
+                    <target>11</target>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
+```
+
+### Key Components:
+- **Tumbling Windows**: Fixed-time windows that aggregate data within specific intervals.
+- **Hazelcast Map as Stream Source**: The expenses are stored in a Hazelcast map and updated in real-time.
+- **Dynamic Data Addition**: The `simulateDataStream` method adds new entries dynamically, and the tumbling window recalculates the sum for each user.
+
+This updated demo should now meet your requirements for Hazelcast 5.x. Let me know if you need any additional adjustments!
+
+
 
