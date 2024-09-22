@@ -242,3 +242,50 @@ public class TimeUtil {
 
 
 
+import com.hazelcast.jet.Jet;
+import com.hazelcast.jet.JetInstance;
+import com.hazelcast.jet.pipeline.*;
+
+import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+
+public class EventWithTimeLoggingExample {
+
+    public static void main(String[] args) {
+        JetInstance jet = Jet.newJetInstance();
+
+        // Formatter to display time as HH:mm:ss.SSS
+        DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
+
+        // Create a pipeline
+        Pipeline pipeline = Pipeline.create();
+
+        // Use the map journal as a stream source
+        pipeline.readFrom(Sources.mapJournal("myMap"))
+                .filter(event -> event.getType() == com.hazelcast.map.journal.EventJournalMapEvent.Type.ADDED)
+                .withTimestamps(event -> {
+                    long timestampMillis = System.currentTimeMillis(); // Extract the timestamp
+
+                    // Convert epoch millis to LocalTime (only hours, minutes, seconds, milliseconds)
+                    LocalTime eventTime = Instant.ofEpochMilli(timestampMillis)
+                                                 .atZone(ZoneId.systemDefault())
+                                                 .toLocalTime();
+
+                    // Log only the time part (HH:mm:ss.SSS)
+                    System.out.println("Event: " + event + ", Time: " + eventTime.format(timeFormatter));
+
+                    return timestampMillis; // Return the original timestamp for Jet's internal use
+                }, 0)  // Zero lag time
+                .writeTo(Sinks.logger());
+
+        // Execute the pipeline
+        jet.newJob(pipeline);
+
+        // Simulate map updates in another thread or environment (not shown here)
+    }
+}
+
+
+
