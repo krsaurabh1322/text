@@ -969,3 +969,44 @@ In this example, Hazelcast Jet processes a stream of transactions, calculates th
 1. **Distributed Caching**: Store and access frequently used data across multiple nodes to reduce database load.
 2. **Session Clustering**: Share session data across nodes to ensure high availability and failover capabilities.
 3. **Real-Time Analytics**: Process and analyze streams of data as they are generated, allowing for real-time insights and decision-making.
+
+
+=========
+
+
+For calculating a running total, you should use a **stateful aggregation** method with a **tumbling window** or **sliding window**, depending on your requirements.
+
+### 1. Tumbling Window
+
+- **Use Case**: If you want to calculate the total amount for fixed intervals (e.g., every 10 minutes).
+- **Behavior**: It resets the total at the start of each window.
+
+**Example**:
+
+```java
+pipeline.readFrom(source)
+    .groupingKey(value -> 1)
+    .window(WindowDefinition.tumbling(10, TimeUnit.MINUTES))
+    .aggregate(AggregateOperations.summingLong(value -> value)) // Running total for each 10-minute window
+    .writeTo(Sinks.logger());
+```
+
+### 2. Sliding Window
+
+- **Use Case**: If you want to maintain a running total that overlaps between windows (e.g., a rolling sum over the last 5 minutes, updated every minute).
+- **Behavior**: It continuously updates the total, providing more granular insights.
+
+**Example**:
+
+```java
+pipeline.readFrom(source)
+    .groupingKey(value -> 1)
+    .window(WindowDefinition.sliding(5, 1, TimeUnit.MINUTES))
+    .aggregate(AggregateOperations.summingLong(value -> value)) // Running total over the last 5 minutes
+    .writeTo(Sinks.logger());
+```
+
+### Conclusion
+
+- Use a **tumbling window** if you want distinct totals for separate time intervals.
+- Use a **sliding window** if you need a continuous running total that reflects the most recent data within a specified timeframe.
