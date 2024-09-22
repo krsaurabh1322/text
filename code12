@@ -431,4 +431,133 @@ In production:
 Running Hazelcast in a **single-node** setup like your local environment is ideal for development and testing, but in production, a **multi-member cluster** provides horizontal scalability, high availability, and data resilience.
 
 
+≠===========
+
+In Hazelcast 5.x and later, you can submit jobs through the `JetService` and also manage the lifecycle of both the server and the jobs. To handle shutting down the Hazelcast cluster or server and managing job lifecycles, follow these steps.
+
+### 1. **Submitting a Job Using JetService**
+
+First, get the `JetService` from your Hazelcast instance. The `JetService` is used to submit, manage, and monitor Jet jobs.
+
+Here’s how to submit a job:
+
+```java
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.jet.JetService;
+import com.hazelcast.jet.pipeline.Pipeline;
+
+public class JetJobSubmission {
+
+    public static void main(String[] args) {
+        // Assume you already have a HazelcastInstance running (server)
+        HazelcastInstance hazelcastInstance = Hazelcast.newHazelcastInstance();
+        
+        // Get the JetService from the Hazelcast instance
+        JetService jetService = hazelcastInstance.getJet();
+        
+        // Create a pipeline (this is just an example)
+        Pipeline pipeline = Pipeline.create();
+        // Define the pipeline logic here (data sources, transformations, sinks)
+        
+        // Submit the pipeline as a Jet job
+        jetService.newJob(pipeline);
+
+        System.out.println("Jet job submitted.");
+    }
+}
+```
+
+### 2. **Shutting Down Hazelcast and JetService**
+
+To gracefully shut down Hazelcast and any running Jet jobs, you can simply use the `shutdown()` method on the `HazelcastInstance`. This will stop the server and shut down all the resources associated with it, including Jet jobs:
+
+```java
+import com.hazelcast.core.HazelcastInstance;
+
+public class JetShutdown {
+
+    public static void main(String[] args) {
+        // Start Hazelcast instance (as a server)
+        HazelcastInstance hazelcastInstance = Hazelcast.newHazelcastInstance();
+        
+        // Get the JetService
+        JetService jetService = hazelcastInstance.getJet();
+        
+        // Perform Jet job submission or other logic
+        // ...
+
+        // Shutdown the Hazelcast instance (and JetService)
+        hazelcastInstance.shutdown();
+
+        System.out.println("Hazelcast server and Jet service have been shut down.");
+    }
+}
+```
+
+### 3. **Graceful Job Cancellation Before Shutdown**
+
+If you want to cancel or gracefully finish jobs before shutting down the Hazelcast server, you can retrieve the jobs via the `JetService` and cancel or complete them as needed:
+
+```java
+import com.hazelcast.jet.Job;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.jet.JetService;
+
+import java.util.List;
+
+public class JobManagement {
+
+    public static void main(String[] args) {
+        HazelcastInstance hazelcastInstance = Hazelcast.newHazelcastInstance();
+        JetService jetService = hazelcastInstance.getJet();
+
+        // Get all running jobs
+        List<Job> jobs = jetService.getJobs();
+
+        // Cancel all running jobs before shutdown
+        for (Job job : jobs) {
+            System.out.println("Cancelling job: " + job.getName());
+            job.cancel();
+        }
+
+        // Now shut down Hazelcast and JetService
+        hazelcastInstance.shutdown();
+    }
+}
+```
+
+### 4. **Job Lifecycle Management**
+- `job.cancel()`: Cancels the job. It doesn't guarantee that the job will terminate instantly, but it will stop once it reaches a safe stopping point.
+- `job.join()`: Waits for the job to complete.
+- `job.restart()`: Restarts the job if it has failed or been canceled.
+
+### 5. **Shutting Down a Jet Client**
+
+If you’re using a Jet client (`JetClient`), simply call the `shutdown()` method on the client when you're done:
+
+```java
+import com.hazelcast.jet.JetClient;
+
+public class JetClientShutdown {
+
+    public static void main(String[] args) {
+        // Assume JetClient is running
+        JetClient jetClient = Jet.newJetClient();
+        
+        // Submit job logic here if needed
+        // ...
+
+        // Shutdown the JetClient when done
+        jetClient.shutdown();
+        System.out.println("JetClient has been shut down.");
+    }
+}
+```
+
+### Summary:
+- Use `jetService.newJob(pipeline)` to submit a job.
+- Use `hazelcastInstance.shutdown()` to gracefully shut down Hazelcast, which also shuts down Jet jobs.
+- Optionally, retrieve and manage jobs using `jetService.getJobs()`, and call methods like `cancel()`, `join()`, or `restart()` before shutting down the server.
+
+
 
