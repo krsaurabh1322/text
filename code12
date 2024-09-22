@@ -218,3 +218,23 @@ public class TumblingWindowExample {
         }
     }
 }
+
+
+public class TimeUtil {
+
+    public static String convertMillisToHMS(long millis) {
+        long seconds = millis / 1000;
+        long hours = seconds / 3600;
+        seconds %= 3600;
+        long minutes = seconds / 60;
+        seconds %= 60;
+
+        return String.format("%02d:%02d:%02d", hours, minutes, seconds);
+    }
+
+    public static void main(String[] args) {
+        long milliseconds = 3661000; // Example: 1 hour, 1 minute, and 1 second
+        String formattedTime = convertMillisToHMS(milliseconds);
+        System.out.println(formattedTime); // Output: 01:01:01
+    }
+}
