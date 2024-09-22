@@ -69,3 +69,76 @@ public class TumblingWindowExample {
         }
     }
 }
+
+
+
+
+import com.hazelcast.jet.Jet;
+import com.hazelcast.jet.JetInstance;
+import com.hazelcast.jet.pipeline.*;
+import com.hazelcast.jet.pipeline.SourceBuilder;
+
+import java.util.concurrent.TimeUnit;
+
+public class TumblingWindowExample {
+
+    public static void main(String[] args) {
+        JetInstance jet = Jet.newJetInstance();
+
+        // Create a pipeline
+        Pipeline pipeline = Pipeline.create();
+
+        // Create a source simulating data stream
+        StreamSource<String> source = createSimulatedSource();
+
+        // Add the source to the pipeline
+        pipeline.readFrom(source)
+                .map(value -> {
+                    String[] parts = value.split(",");
+                    String name = parts[0];
+                    double amount = Double.parseDouble(parts[1]);
+                    return new Transaction(name, amount);
+                })
+                .groupingKey(Transaction::getName) // Group by name
+                .window(WindowDefinition.tumbling(5, TimeUnit.SECONDS)) // Tumbling window of 5 seconds
+                .aggregate(AggregateOperations.summingDouble(Transaction::getAmount)) // Sum the amounts
+                .writeTo(Sinks.logger()); // Log the results to the console
+
+        // Execute the pipeline
+        jet.newJob(pipeline);
+    }
+
+    private static StreamSource<String> createSimulatedSource() {
+        return SourceBuilder.stream("SimulatedSource")
+                .<String>streaming()
+                .fillBufferFn((buffer, ctx) -> {
+                    String[] names = {"Alice", "Bob", "Charlie", "David"};
+                    for (long i = 0; i < 100; i++) {
+                        String name = names[(int) (i % names.length)];
+                        double amount = Math.random() * 100; // Generate random amount
+                        buffer.add(name + "," + amount); // Emit simulated data
+                        Thread.sleep(100); // Simulate some delay between emissions
+                    }
+                })
+                .build();
+    }
+
+    // Transaction class to hold name and amount
+    static class Transaction {
+        private final String name;
+        private final double amount;
+
+        public Transaction(String name, double amount) {
+            this.name = name;
+            this.amount = amount;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public double getAmount() {
+            return amount;
+        }
+    }
+}
