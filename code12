@@ -289,3 +289,50 @@ public class EventWithTimeLoggingExample {
 
 
 
+
+The Directed Acyclic Graph (DAG) you see here represents the execution plan for the Hazelcast Jet job named "ExpenseAggregationJob." A DAG is a flowchart-like structure that shows the various stages of the job execution, including data sources, transformation steps, and output sinks, along with their relationships.
+
+Here’s a breakdown of what you are seeing in the DAG and its attributes:
+
+1. **"file-source" [localParallelism=1]**:
+   - This is the node in the DAG where data is read from the file. The attribute `localParallelism=1` indicates that this operation is not parallelized (it runs on a single thread on each node).
+
+2. **"file-source-add-timestamps" [localParallelism=1]**:
+   - After reading the file, timestamps are added to the records. This is still running with `localParallelism=1`, meaning only one thread per node handles this.
+
+3. **"map" [localParallelism=8]**:
+   - This is a transformation operation (possibly filtering, mapping, or similar). Here, parallelism is increased to 8, meaning that 8 threads will process the data.
+
+4. **"sliding-window-prepare" and "sliding-window" [localParallelism=8]**:
+   - These represent operations preparing for and performing a sliding window aggregation. Sliding windows are commonly used for time-based aggregations, and with `localParallelism=8`, multiple threads will handle the windowing and aggregation of data.
+
+5. **"loggerSink" [localParallelism=1]**:
+   - The final step, which logs the output. This only uses one thread.
+
+### Sequence of Execution
+- The DAG flow is indicated by arrows (`->`) that show the sequence of execution:
+   - `file-source -> file-source-add-timestamps`: Data is first read from the file, and timestamps are added.
+   - `file-source-add-timestamps -> map`: The data, now with timestamps, is passed to the `map` step, where some transformation happens.
+   - `map -> sliding-window-prepare -> sliding-window`: After mapping, the data is processed through a sliding window preparation stage, then aggregated over the sliding window.
+   - `sliding-window -> loggerSink`: Finally, the aggregated data is passed to the logger sink.
+
+### Where is the Data?
+- **Data from the File**: The node `"file-source"` is where your file data is read.
+- **Data Transformation**: As the DAG progresses from `"file-source"` to `"map"` and later to `"sliding-window"`, the data is transformed and aggregated.
+- **Data Flow**: The arrows in the DAG show how the data moves from one step to another.
+
+### Attributes in the DAG
+- **localParallelism**: This attribute indicates how many threads will execute a particular task on each node in the Hazelcast Jet cluster.
+- **queueSize**: This attribute specifies the size of the queue between stages. For instance, `queueSize=1024` indicates that the system will buffer up to 1024 items between these stages before processing the next batch.
+
+### Summary of the Flow:
+1. **File Reading** (`file-source`) -> 
+2. **Add Timestamps** (`file-source-add-timestamps`) -> 
+3. **Transformation/Mapping** (`map`) -> 
+4. **Window Preparation & Aggregation** (`sliding-window-prepare`, `sliding-window`) -> 
+5. **Logging the Results** (`loggerSink`).
+
+In this DAG, your data is being read from a file, transformed, aggregated over a sliding window, and finally logged. The `map` and `sliding-window` stages are running with high parallelism to speed up the job.
+
+
+
