@@ -1,0 +1,71 @@
+import com.hazelcast.jet.Jet;
+import com.hazelcast.jet.JetInstance;
+import com.hazelcast.jet.pipeline.*;
+import com.hazelcast.jet.pipeline.Sources;
+
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+
+public class TumblingWindowExample {
+
+    private static final String[] NAMES = {"Alice", "Bob", "Charlie", "Diana", "Eve"};
+    private static final Random RANDOM = new Random();
+
+    public static void main(String[] args) {
+        JetInstance jet = Jet.newJetInstance();
+
+        // Create a pipeline
+        Pipeline pipeline = Pipeline.create();
+
+        // Create a source simulating data stream
+        StreamSource<String> source = createSimulatedSource();
+
+        // Add the source to the pipeline
+        pipeline.readFrom(source)
+                .map(value -> {
+                    String[] parts = value.split(", ");
+                    String name = parts[0];
+                    long amount = Long.parseLong(parts[1]);
+                    return new Transaction(name, amount); // Assuming Transaction is a class you define
+                })
+                .groupingKey(Transaction::getName) // Group by name
+                .window(WindowDefinition.tumbling(5, TimeUnit.SECONDS)) // Tumbling window of 5 seconds
+                .aggregate(AggregateOperations.summingLong(Transaction::getAmount)) // Sum the amounts
+                .writeTo(Sinks.logger()); // Log the results to the console
+
+        // Execute the pipeline
+        jet.newJob(pipeline);
+    }
+
+    private static StreamSource<String> createSimulatedSource() {
+        return Source.fromProcessor("SimulatedSource", SourceProcessor.builder()
+                .<String>flatMap((context, emitter) -> {
+                    for (int i = 0; i < 100; i++) {
+                        String name = NAMES[RANDOM.nextInt(NAMES.length)];
+                        long amount = RANDOM.nextInt(1000) + 1; // Random amount between 1 and 1000
+                        emitter.emit(name + ", " + amount); // Emit simulated data
+                        Thread.sleep(100); // Simulate some delay between emissions
+                    }
+                })
+                .build());
+    }
+
+    // Example Transaction class
+    static class Transaction {
+        private final String name;
+        private final long amount;
+
+        public Transaction(String name, long amount) {
+            this.name = name;
+            this.amount = amount;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public long getAmount() {
+            return amount;
+        }
+    }
+}
