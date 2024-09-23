@@ -1,0 +1,3 @@
+COPY (SELECT * FROM your_table WHERE condition) 
+TO '/path/to/your/file.csv' 
+WITH (FORMAT CSV, HEADER);
