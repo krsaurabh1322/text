@@ -1,3 +1,46 @@
 COPY (SELECT * FROM your_table WHERE condition) 
 TO '/path/to/your/file.csv' 
 WITH (FORMAT CSV, HEADER);
+
+
+In **Hazelcast**, the number of partitions is not directly determined by the number of entries or the number of nodes in the cluster. Instead, Hazelcast uses a fixed number of partitions for the entire cluster, and this number is configurable. By default, Hazelcast creates **271 partitions**, regardless of how many nodes or entries are present.
+
+Here's how it works:
+
+1. **Default Number of Partitions**: Hazelcast uses **271 partitions** by default. This number is fixed and does not change based on the size of the cluster or the number of entries. However, it can be configured if necessary.
+
+2. **Partition Distribution Among Nodes**: When you add nodes to the cluster, Hazelcast distributes the partitions evenly across all nodes.
+   - In a cluster with 3 nodes, Hazelcast will divide the 271 partitions as evenly as possible among the nodes. So each node will get approximately **90 partitions** (with some nodes possibly getting one more or one less due to integer division).
+
+3. **Entries Are Assigned to Partitions**: When you store an entry in an `IMap`, Hazelcast uses a consistent hashing algorithm to assign the entry to a specific partition. The hash of the key determines which partition the entry belongs to.
+   - In your example of storing **9 entries**, Hazelcast will assign each entry to one of the 271 partitions based on the hash of its key. Since there are only 9 entries, some partitions will remain empty, and only 9 partitions will have data.
+
+4. **Partition Ownership**: Once the entries are assigned to partitions, Hazelcast will distribute those partitions across the available nodes.
+   - In your case, since you have 3 nodes, each node will host a portion of the 271 partitions (about 90 partitions per node).
+   - The partitions that contain your 9 entries will be stored across these 3 nodes, and Hazelcast will also replicate some partitions to other nodes for redundancy.
+
+### Example:
+
+Let's consider you have 3 nodes, 271 partitions, and 9 entries:
+
+- **Node 1** might be responsible for partitions 0-89.
+- **Node 2** might be responsible for partitions 90-179.
+- **Node 3** might be responsible for partitions 180-270.
+
+Now, let’s say you insert 9 entries into an `IMap`. These entries will be hashed and assigned to partitions across the 3 nodes, such as:
+- Entry 1 → Partition 10 (Node 1)
+- Entry 2 → Partition 93 (Node 2)
+- Entry 3 → Partition 188 (Node 3)
+- Entry 4 → Partition 45 (Node 1)
+- Entry 5 → Partition 127 (Node 2)
+- Entry 6 → Partition 205 (Node 3)
+- ...and so on.
+
+### Key Points:
+
+- **Number of partitions** is fixed (default 271) and independent of the number of entries or nodes.
+- **Entries are hashed** into partitions based on their keys.
+- **Partitions are distributed** evenly across all nodes in the cluster, ensuring balanced data distribution.
+- **Replication** ensures that backup copies of each partition are stored on different nodes to maintain fault tolerance.
+
+So, even if you store only 9 entries, Hazelcast will still use 271 partitions, and each entry will be assigned to a specific partition. The partitions that contain your entries will be spread across the 3 nodes in the cluster.
