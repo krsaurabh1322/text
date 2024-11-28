@@ -16,3 +16,17 @@ FROM
     pg_matviews
     JOIN pg_class ON pg_class.oid = pg_matviews.matviewoid;
 
+
+
+SELECT
+    matviewname AS view_name,
+    pg_size_pretty(pg_relation_size(c.oid)) AS size,
+    pg_size_pretty(pg_total_relation_size(c.oid)) AS total_size,
+    c.reltuples::BIGINT AS row_estimate
+FROM
+    pg_matviews m
+    JOIN pg_class c ON c.relname = m.matviewname
+WHERE
+    c.relkind = 'm'
+ORDER BY
+    pg_relation_size(c.oid) DESC;
