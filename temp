@@ -1,0 +1,18 @@
+SELECT
+    matviewname AS view_name,
+    pg_size_pretty(pg_relation_size(matviewoid)) AS size,
+    pg_size_pretty(pg_total_relation_size(matviewoid)) AS total_size,
+    reltuples::BIGINT AS row_estimate
+FROM
+    pg_matviews
+    JOIN pg_class ON pg_class.oid = pg_matviews.matviewoid
+ORDER BY
+    pg_relation_size(matviewoid) DESC;
+
+
+SELECT
+    pg_size_pretty(SUM(pg_total_relation_size(matviewoid))) AS total_size
+FROM
+    pg_matviews
+    JOIN pg_class ON pg_class.oid = pg_matviews.matviewoid;
+
