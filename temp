@@ -30,3 +30,22 @@ WHERE
     c.relkind = 'm'
 ORDER BY
     pg_relation_size(c.oid) DESC;
+
+
+
+
+-------
+
+Here’s a clear and concise way to express this:
+
+---
+
+"There is a grid component in production that is not loading properly. We have observed that it often requires multiple restarts before it appears. Interestingly, no errors are logged, but repeated restarts seem to resolve the issue temporarily.  
+
+After some testing, it became apparent that the issue might be related to the Drawer component in the main view, so I removed it. While this made the grid component load consistently, the Transfer List component began exhibiting similar behavior.  
+
+I discussed this with Rinki, but we couldn't pinpoint the exact cause. From the LoansHub side, we've observed that this issue isn't isolated to Self Service but also occurs in First, especially after fresh deployments. It's now evident across all environments, with the latest occurrence in the dev environment.  
+
+Could we investigate further to understand what might be causing this behavior?"
+
+
