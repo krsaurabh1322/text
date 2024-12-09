@@ -9,3 +9,186 @@ Here's how you could express it:
 3. **Slow Release Cycle**: The release cycle for Open Cat is slower than desired, causing delays in deploying updates and new features.  
 
 Addressing these issues could significantly improve development efficiency and delivery timelines."
+
+
+If the **Permissioning Service** is not using gRPC but the other components are, the architecture needs to accommodate both communication methods. Below is a revised flow and architecture that reflects direct communication with the **Permissioning Service** via a separate method (e.g., REST API or direct Java call), while the rest of the flow uses gRPC for backend data.
+
+---
+
+### **Revised Data Flow (Hybrid Communication with Permissioning Service):**
+
+```plaintext
+React (OpenFin) ──> WebSocket ──> Node.js ──> gRPC Backend ────> Caching Service (Java)
+    ↑                    ↑                ↑
+    └─── Response ───────┘        ┌─────────────────┐
+                                  └── Permissioning Service (Java, via REST or direct call)
+```
+
+### **Data Flow Breakdown:**
+
+1. **React App (OpenFin Client)**:
+   - Sends requests to Node.js over WebSocket.
+
+2. **Node.js WebSocket Proxy**:
+   - Handles WebSocket connections from the React app.
+   - Forwards requests to the gRPC backend.
+   - Makes a **separate HTTP REST call** (or direct Java call via an exposed endpoint) to the **Permissioning Service** for authorization.
+
+3. **Permissioning Service (Java)**:
+   - Validates the user’s permission via REST or local Java method and returns the authorization status.
+   - Sends back a response indicating whether the user has access.
+
+4. **gRPC Backend (Java)**:
+   - Once permission is confirmed, retrieves data from the **Caching Service** or other data sources.
+
+5. **Caching Service (Java)**:
+   - Provides cached data to the gRPC backend if available.
+
+6. **Response Backflow**:
+   - gRPC backend sends the data back to Node.js.
+   - Node.js forwards the data to the React client over WebSocket.
+
+---
+
+### **Code Example for Node.js WebSocket with REST Call to Permissioning:**
+
+```javascript
+const WebSocket = require('ws');
+const grpc = require('@grpc/grpc-js');
+const axios = require('axios');
+
+// gRPC Client Setup
+const PROTO_PATH = './data_service.proto';
+const grpcClient = new grpc.loadPackageDefinition(
+  require('@grpc/proto-loader').loadSync(PROTO_PATH)
+).DataService('localhost:50051', grpc.credentials.createInsecure());
+
+const wsServer = new WebSocket.Server({ port: 8080 });
+
+wsServer.on('connection', (ws) => {
+  ws.on('message', async (message) => {
+    const request = JSON.parse(message);
+
+    if (request.type === 'FETCH_DATA') {
+      const userId = request.payload.userId;
+      const key = request.payload.key;
+
+      try {
+        // Step 1: Call Permissioning Service (via REST)
+        const permissionResponse = await axios.post(
+          'http://localhost:8081/permission/check',
+          { userId, action: 'FETCH_DATA' }
+        );
+
+        if (!permissionResponse.data.isAuthorized) {
+          ws.send(JSON.stringify({ error: 'Permission Denied' }));
+          return;
+        }
+
+        // Step 2: Fetch Data from gRPC Backend
+        grpcClient.getData({ userId, key }, (error, response) => {
+          if (error) {
+            ws.send(JSON.stringify({ error: error.message }));
+          } else {
+            ws.send(JSON.stringify(response));
+          }
+        });
+      } catch (err) {
+        ws.send(JSON.stringify({ error: 'Permission Check Failed' }));
+      }
+    }
+  });
+});
+```
+
+---
+
+### **Java Permissioning Service (REST API Example):**
+
+```java
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/permission")
+public class PermissioningController {
+
+    @PostMapping("/check")
+    public PermissionResponse checkPermission(@RequestBody PermissionRequest request) {
+        boolean isAuthorized = permissionService.isAuthorized(request.getUserId(), request.getAction());
+        return new PermissionResponse(isAuthorized);
+    }
+}
+
+class PermissionRequest {
+    private String userId;
+    private String action;
+
+    // Getters and setters
+}
+
+class PermissionResponse {
+    private boolean isAuthorized;
+
+    public PermissionResponse(boolean isAuthorized) {
+        this.isAuthorized = isAuthorized;
+    }
+
+    public boolean isAuthorized() {
+        return isAuthorized;
+    }
+}
+```
+
+---
+
+### **gRPC Backend Data Retrieval Example:**
+
+```java
+public void getData(Request request, StreamObserver<DataResponse> responseObserver) {
+    String key = request.getKey();
+    
+    // Check Cache
+    Optional<String> cachedData = cacheService.getFromCache(key);
+    if (cachedData.isPresent()) {
+        responseObserver.onNext(DataResponse.newBuilder()
+            .setMessage("Data from Cache")
+            .addItems(cachedData.get())
+            .build());
+    } else {
+        // Fetch fresh data if not cached
+        String freshData = fetchFreshData(key);  // Custom method
+        cacheService.putInCache(key, freshData);
+        responseObserver.onNext(DataResponse.newBuilder()
+            .setMessage("Fresh Data")
+            .addItems(freshData)
+            .build());
+    }
+    responseObserver.onCompleted();
+}
+```
+
+---
+
+### **Summary of Roles:**
+
+1. **React App (OpenFin)**: Sends WebSocket requests for data.
+2. **Node.js WebSocket Proxy**:
+   - Manages WebSocket connections.
+   - Calls the Permissioning Service via REST.
+   - Forwards authorized requests to the gRPC backend.
+3. **Permissioning Service (Java)**:  
+   - Provides authorization via REST (or direct Java call).
+4. **gRPC Backend (Java)**:
+   - Manages data retrieval.
+   - Interacts with the caching service.
+5. **Caching Service (Java)**:
+   - Supplies cached data or updates with fresh data.
+
+---
+
+### **Advantages of This Architecture:**
+
+- **Flexibility**: Supports both REST and gRPC, enabling seamless integration.
+- **Real-Time Communication**: WebSocket ensures fast, two-way communication with the desktop app.
+- **Modularity**: Different services (permissioning, caching) remain independent and scalable.
+- **Security**: Centralized permission checks via the Permissioning Service ensure data access control.
