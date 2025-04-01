@@ -1,0 +1,121 @@
+Here’s a proposed database schema and system architecture based on your requirements.
+
+
+---
+
+Database Schema (PostgreSQL)
+
+Loan Inventory Table
+
+Stores all loans available in the system.
+
+CREATE TABLE loan_inventory (
+    loan_id SERIAL PRIMARY KEY,
+    loan_name TEXT NOT NULL,
+    loan_amount DECIMAL(18,2) NOT NULL,
+    interest_rate DECIMAL(5,2),
+    status TEXT CHECK (status IN ('available', 'allocated', 'replenished', 'closed')),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+Program Table
+
+Stores CLO programs.
+
+CREATE TABLE program (
+    program_id SERIAL PRIMARY KEY,
+    program_name TEXT NOT NULL,
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+Loan-Program Mapping
+
+Tracks which loans are allocated to which programs.
+
+CREATE TABLE loan_program_mapping (
+    mapping_id SERIAL PRIMARY KEY,
+    program_id INT REFERENCES program(program_id),
+    loan_id INT REFERENCES loan_inventory(loan_id),
+    status TEXT CHECK (status IN ('pending', 'approved', 'rejected')),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+Rules Table
+
+Stores eligibility criteria and replenishment conditions in JSON format.
+
+CREATE TABLE rules (
+    rule_id SERIAL PRIMARY KEY,
+    program_id INT REFERENCES program(program_id),
+    rule_type TEXT CHECK (rule_type IN ('eligibility', 'replenishment')),
+    rule_data JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+Audit Table
+
+Tracks all actions performed on loans, programs, and rules.
+
+CREATE TABLE audit_log (
+    log_id SERIAL PRIMARY KEY,
+    entity_type TEXT CHECK (entity_type IN ('loan', 'program', 'rule')),
+    entity_id INT NOT NULL,
+    action TEXT NOT NULL,
+    performed_by TEXT NOT NULL,
+    performed_at TIMESTAMP DEFAULT NOW()
+);
+
+
+---
+
+System Architecture
+
+Backend (Java + Spring Boot)
+
+Controllers: REST endpoints for CRUD operations on loans, programs, and rules.
+
+Services: Business logic for applying rules and managing inventory.
+
+Custom Rule Engine (MVEL or Java-based JSON parsing): Evaluates loan eligibility and replenishment logic dynamically.
+
+
+Frontend (React)
+
+Dashboard to manage loans, programs, and rule configurations.
+
+Loan allocation and eligibility visualization.
+
+Audit log viewing.
+
+
+Database (PostgreSQL)
+
+Stores structured data for loans, programs, rules, and logs.
+
+Indexing for performance optimization.
+
+
+Workflow
+
+1. User creates a CLO program.
+
+
+2. User uploads eligibility and replenishment rules (in JSON).
+
+
+3. Loan inventory is checked against eligibility rules.
+
+
+4. Loans are assigned to programs based on the rule engine.
+
+
+5. Audit logs capture all activities.
+
+
+6. Replenishment rules run periodically to adjust loan allocations.
+
+
+
