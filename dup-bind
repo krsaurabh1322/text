@@ -1,0 +1,14 @@
+public class LIQFeedModule extends FeedModule {
+    @Override
+    protected void configure() {
+        super.configure(); // Keep existing FeedModule bindings
+
+        install(new PrivateModule() {
+            @Override
+            protected void configure() {
+                bind(SinkDelegate.class).toProvider(() -> null).in(Singleton.class);
+                expose(SinkDelegate.class); // Makes it available outside this module
+            }
+        });
+    }
+}
