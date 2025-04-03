@@ -12,3 +12,13 @@ public class LIQFeedModule extends FeedModule {
         });
     }
 }
+
+Injector injector = Guice.createInjector(
+    Modules.override(new FeedModule())
+        .with(new AbstractModule() {
+            @Override
+            protected void configure() {
+                bind(SinkDelegate.class).toProvider(() -> null).in(Singleton.class);
+            }
+        })
+);
