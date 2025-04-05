@@ -326,3 +326,16 @@ API interactions
 Let me generate it now.
 
 
+
+
+db.ExtinguishedUnderwritingView.find({ daysHeldAsAtToday: { $exists: true } }).forEach(function(doc) {
+  var val = parseInt(doc.daysHeldAsAtToday);
+  if (!isNaN(val)) {
+    db.ExtinguishedUnderwritingView.updateOne(
+      { _id: doc._id },
+      { $set: { daysHeldAsAtToday: val } }
+    );
+  }
+});
+
+
