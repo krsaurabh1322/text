@@ -6,3 +6,8 @@ if (!filePath.startsWith(rootPath)) {
 }
 
 return filePath;
+
+
+
+Team, here are the results from the in-office voting:
+Based on the responses, it seems most people prefer coming in on Thursdays and Fridays. Everyone has agreed on Friday as the second in-office day. For the first day, it was a close call between Thursday and Monday, with Thursday receiving two more votes. So, the final in-office days will be Thursday and Friday.
