@@ -1,0 +1,8 @@
+Path rootPath = Paths.get(rootDir).toRealPath().normalize();
+Path filePath = rootPath.resolve(sanitizedFilename).normalize();
+
+if (!filePath.startsWith(rootPath)) {
+    throw new SecurityException("Attempted path traversal attack: " + sanitizedFilename);
+}
+
+return filePath;
