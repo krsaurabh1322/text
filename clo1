@@ -339,3 +339,14 @@ db.ExtinguishedUnderwritingView.find({ daysHeldAsAtToday: { $exists: true } }).f
 });
 
 
+result = new java.util.ArrayList();
+foreach (l : loanInventory) {
+  if (l.ctryOfRisk == "JAPAN" || l.ctryOfRisk == "SINGAPORE") {
+    entry = new java.util.HashMap();
+    entry.put("loanId", l.loanId);
+    entry.put("ctryOfRisk", l.ctryOfRisk);
+    result.add(entry);
+  }
+}
+return result;
+
