@@ -350,3 +350,182 @@ foreach (l : loanInventory) {
 }
 return result;
 
+_-----------+-++
+
+
+You're on the right track by keeping logic on the backend and letting the UI just call APIs to get the data.
+
+Here’s how to extend your current backend-API-React setup to support partial hedging, dynamic allocation, and contextual loan visibility across views without moving logic into the UI.
+
+
+---
+
+🔧 Backend Design (Java + PostgreSQL)
+
+1. Extend Loan Inventory Table
+
+You already have a limit field (say, in millions). Add:
+
+hedged_amount     NUMERIC DEFAULT 0,
+available_for_hedging AS (limit - hedged_amount)
+
+You can make available_for_hedging a generated column or compute it dynamically in SQL queries. This way, you always know what’s left.
+
+
+---
+
+2. Create a Hedging Allocation Table
+
+This tracks all hedging allocations per view/strategy/etc.
+
+hedging_allocations (
+    id                UUID PRIMARY KEY,
+    loan_id           UUID REFERENCES loans(id),
+    allocated_amount  NUMERIC,
+    allocated_for     TEXT, -- e.g. 'View1', 'View2'
+    created_at        TIMESTAMP DEFAULT now(),
+    updated_at        TIMESTAMP
+)
+
+Whenever a user hedges or unhedges, insert/update/delete from this table.
+
+
+---
+
+3. Create an API that Returns Loans by View
+
+This is the key part. Create an API endpoint like:
+
+GET /api/loans/available?view=View2
+
+The backend logic:
+
+Joins loans with hedging_allocations
+
+Groups by loan_id
+
+Sums allocations
+
+Filters:
+
+Show loan if it still has limit > total_hedged (i.e., something available)
+
+Exclude loan if for a previous view (e.g., View1), it's fully hedged
+
+
+
+Example SQL:
+
+SELECT l.*,
+       l.limit - COALESCE(SUM(ha.allocated_amount), 0) AS available_amount
+FROM loans l
+LEFT JOIN hedging_allocations ha ON l.id = ha.loan_id
+GROUP BY l.id
+HAVING 
+    SUM(CASE WHEN ha.allocated_for = 'View1' THEN ha.allocated_amount ELSE 0 END) < l.limit
+    AND SUM(ha.allocated_amount) < l.limit
+
+You can adjust this logic based on hierarchy of views (View1, View2, etc.).
+
+
+---
+
+4. POST / UPDATE Hedging Allocation via API
+
+Your API should expose:
+
+POST /api/hedging → to create/update allocation
+
+DELETE /api/hedging/:id → to remove allocation (undo)
+
+These APIs will:
+
+Validate that total doesn’t exceed loan limit
+
+Update hedging_allocations
+
+Recalculate hedged_amount on loans if you're maintaining that as a column
+
+
+
+
+---
+
+🧠 Business Logic - Hedge Visibility by View
+
+You need a view priority system. For example:
+
+List<String> viewPriority = List.of("View1", "View2", "View3");
+
+In backend:
+
+For View2, show loans where:
+
+Loan is not fully allocated in View1
+
+Some available amount still remains after View1’s allocation
+
+
+For View3, exclude any loans fully hedged in View1 + View2.
+
+
+
+---
+
+🖥️ React UI
+
+Since UI doesn't do business logic:
+
+1. Call /api/loans/available?view=View2
+
+
+2. Render available_amount and allow hedging (partial/full) via form
+
+
+3. Submit to /api/hedging to save
+
+
+4. Refresh list after submit
+
+
+
+Optional: show how much is already hedged.
+
+
+---
+
+🧪 Example Flow
+
+Loan A has limit = 100
+
+User in View1 hedges 60 → 40 remains
+
+View2 gets available_amount = 40
+
+User in View2 hedges 40 → now total is 100
+
+View3 gets no result for Loan A
+
+If View2 user reduces their hedge to 30 → 10 is now free
+
+View3 again sees available_amount = 10 for Loan A
+
+
+
+---
+
+✅ Summary
+
+Use a central allocation table.
+
+API returns loans by computing effective available amount.
+
+Maintain view hierarchy and apply logic per view.
+
+Let UI stay simple: display, input, call API.
+
+
+Would you like sample Java code or SQL queries for this setup?
+
+
+
