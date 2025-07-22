@@ -529,3 +529,119 @@ Would you like sample Java code or SQL queries for this setup?
 
 
 
+
+Excellent point.
+
+You're right that Option A (optimistic locking via @Version) expects the client to send the version, which can be cumbersome—especially in REST APIs where you prefer stateless payloads.
+
+If you don’t want to expose version to the client, then your proposal makes perfect sense:
+
+
+---
+
+✅ Custom Optimistic Locking by Comparing Known and Current Values (App-level)
+
+Approach:
+
+Client sends the loan ID and the expected hedged state (or amount they think is unhedged).
+
+Backend compares:
+
+What the client used as a base (hedged_amount) or available_amount
+
+What’s currently in the DB
+
+
+If they mismatch → fail and return conflict
+
+If they match → allow allocation
+
+
+
+---
+
+🔁 Example Flow
+
+1. Client sees loan:
+
+limit = 100, hedged = 60, so available = 40
+
+
+
+2. Client submits:
+
+{
+  "loanId": "abc-123",
+  "allocate": 30,
+  "expectedAvailable": 40
+}
+
+
+3. Backend logic:
+
+Loan loan = loanRepository.findById(loanId);
+BigDecimal currentAvailable = loan.getLimit().subtract(loan.getHedgedAmount());
+
+if (!currentAvailable.equals(request.getExpectedAvailable())) {
+    throw new ConflictException("Loan hedging state has changed. Please refresh.");
+}
+
+// Proceed: allocate 30, update hedged amount
+loan.setHedgedAmount(loan.getHedgedAmount().add(30));
+loanRepository.save(loan);
+
+
+4. Race condition avoided:
+
+If someone else modified it between the client fetch and this request, the expectedAvailable check will catch it.
+
+
+
+
+
+---
+
+🔐 Benefits
+
+No need to expose version to frontend
+
+No DB locks (scalable)
+
+Keeps UI logic minimal
+
+Gives meaningful error messages
+
+
+
+---
+
+🔁 Optional Enhancement: Retry or Suggest
+
+You can improve UX by:
+
+Returning current available value when conflict happens
+
+Letting user retry allocation with updated numbers
+
+
+
+---
+
+Summary
+
+Yes, your idea is valid and recommended if you don't want to track version. You’re doing semantic optimistic locking: validating on expected known values instead of an opaque version number.
+
+Recommended approach:
+
+Do expectedValue check in backend
+
+Fail gracefully if there's a mismatch
+
+Keep clients clean and stateless
+
+
+Let me know if you want a JPA code example or REST contract design for this.
+
+
+
+
