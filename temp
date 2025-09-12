@@ -471,5 +471,23 @@ Do you want me to sketch a React component structure for this Simulation Manager
 
 
 
+public enum SimulationState {
+    DRAFT,
+    RUNNING,
+    MONITORING,
+    PROMOTION_PENDING,
+    PROMOTED,
+    ARCHIVED
+}
+
+public enum SimulationEvent {
+    START_SIMULATION,
+    FINISH_RUN,
+    REQUEST_PROMOTION,
+    APPROVE,
+    REJECT
+}
+
+
 
 
