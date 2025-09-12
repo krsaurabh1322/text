@@ -102,3 +102,189 @@ Talk through the story — don’t just read.
 
 Do you want me to make this into a polished PowerPoint draft (with layout suggestions) that you can directly use and tweak?
 
+
+
+That’s a very practical concern 👍 — deciding where to duplicate with a simulation table vs. where to scope inside existing tables.
+
+Let’s walk through it systematically, based on your entities:
+
+
+---
+
+🔹 1. Principles for Deciding
+
+High-churn, user-editable simulation entities → separate tables
+(to isolate experimental data, avoid risk of mixing with production).
+
+Mostly read-only / reference data → reuse main table with scoping
+(don’t duplicate unless simulation can modify them).
+
+Derived entities (reports, audit) → separate but linked to simulation
+(since they’re outputs of a run, not inputs).
+
+
+
+---
+
+🔹 2. Table by Table
+
+✅ Clo Hedge (master entity)
+
+Separate simulation table is best (clo_hedge_sim).
+
+Because this is where simulation diverges most (new hedges, modified hedges).
+
+Promotion = move from clo_hedge_sim → clo_hedge_main.
+
+
+
+---
+
+✅ Clo Allocation
+
+Allocations depend on hedges.
+
+If hedges are simulated, allocations must also be simulated.
+
+Keep a clo_allocation_sim table linked to clo_hedge_sim.hedge_id.
+
+Promotion moves both together.
+
+
+
+---
+
+⚠️ Lookup Tables (programs, class mappings, etc.)
+
+If programs are static (predefined) → use same lookup tables for main + simulation.
+
+If users can create new programs/rules in simulation →
+
+Create program_sim, program_mapping_sim.
+
+Only simulate the new/modified entries, not the entire lookup.
+
+Reads can be unioned: program_main ∪ program_sim.
+
+
+
+
+---
+
+✅ Rules
+
+Rules are dynamic and part of the “what-if” scenario.
+
+Create rules_sim table.
+
+User can draft/edit rules in simulation.
+
+Promotion = copy validated rules → rules_main.
+
+
+
+---
+
+✅ Reports
+
+Reports are outputs of simulation runs, so they must be separate.
+
+Create reports_sim table keyed by (simulation_id, version_no).
+
+No promotion — instead, if simulation is promoted, you regenerate official reports in reports_main.
+
+
+
+---
+
+⚠️ Loan Inventory
+
+If simulations can start at the loan level (i.e., tweak loan inventory itself), then yes, have loan_inventory_sim.
+
+If simulation always starts after loan inventory, then no need.
+
+
+
+---
+
+🔹 3. Suggested Schema Layout
+
+loan_inventory_main
+loan_inventory_sim (optional, only if loan-level sims are needed)
+
+clo_hedge_main
+clo_hedge_sim
+
+clo_allocation_main
+clo_allocation_sim
+
+program_main
+program_sim (only if user creates/modifies programs)
+
+program_mapping_main
+program_mapping_sim (same rule as above)
+
+rules_main
+rules_sim
+
+reports_main
+reports_sim (always separate, never promoted)
+
+lookup tables (static ones like countries) → no sim copy
+
+
+---
+
+🔹 4. Java App Design Implications
+
+Simulation Context (simulation_id, version_no) → always passed down to service + DAO layer.
+
+When in simulation mode →
+
+CRUD hedges/allocations/rules → *_sim tables.
+
+Reads from lookups → main tables (plus union with sim if applicable).
+
+Reports → generated into reports_sim.
+
+
+When promoted →
+
+Data is copied from *_sim to *_main.
+
+Reports are regenerated in reports_main (not copied).
+
+
+
+
+---
+
+🔹 5. Why Not Duplicate Everything?
+
+Lookup tables can explode in size → no benefit in copying unless you allow edits.
+
+Reports shouldn’t be copied → they are derived, not inputs.
+
+Audit tables should stay global → they log both main + simulation actions.
+
+
+
+---
+
+✅ Summary Recommendation
+
+Always duplicate hedges, allocations, rules (simulation tables).
+
+Duplicate program/mapping tables only if simulation can create new ones.
+
+Never duplicate static lookups (like country tables).
+
+Keep reports_sim separate — don’t promote, just regenerate in main after approval.
+
+
+
+---
+
+Would you like me to sketch a data flow diagram that shows how simulation tables sit parallel to main tables, and which ones get promoted vs. regenerated?
+
+
