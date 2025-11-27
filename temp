@@ -264,3 +264,13 @@ If you'd like, I can also:
 ✅ rewrite in more formal corporate language,
 or
 ✅ bundle into a single summary statement for your overall goal rating.
+
+
+
+Designed the reusable backend layer for LH360 leveraging the query-builder framework.
+
+Created the custom rule-engine concept as part of the CLO backend design.
+
+Proposed the shared-table design model to support multi-program data access.
+
+Developed the initial Materialized View design for the Loans Hub, aimed at optimising query performance and simplifying data access patterns.
