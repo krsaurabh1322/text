@@ -274,3 +274,16 @@ Created the custom rule-engine concept as part of the CLO backend design.
 Proposed the shared-table design model to support multi-program data access.
 
 Developed the initial Materialized View design for the Loans Hub, aimed at optimising query performance and simplifying data access patterns.
+
+
+
+
+Ensured API-first design across all new components to reduce coupling and improve maintainability.
+
+Improved latency and performance by introducing strategic caching layers.
+
+Supported the data migration from MongoDB to PostgreSQL, strengthening security and ensuring long-term data consistency.
+
+Removed tight inter-component dependencies, enabling cleaner modular architecture and easier future enhancements.
+
+Drove component reuse and adoption of standard patterns
