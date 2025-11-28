@@ -294,3 +294,12 @@ All modules developed by me were delivered with no coding defects in production,
 
 The components showed stable performance with no latency issues, reflecting optimized queries, efficient API design, and proactive performance tuning
 
+
+
+
+_----------
+
+Estimation Accuracy & Roadmap Planning: Some cost and effort estimates lacked buffer or did not fully reflect team velocity. I aim to improve this by grounding future estimates in historical velocity, complexity assessments, and better upfront planning.
+
+Strengthening SQL Testing Practices: The SQL layer carries complex business logic, and I believe more robust automated testing or SQL-specific validation frameworks are needed. I plan to enhance this area to further reduce data/number inconsistencies and strengthen overall reliability.
+
