@@ -309,3 +309,6 @@ Estimation & Planning: Some effort estimates lacked buffer and didn’t fully al
 
 SQL Logic Testing: The SQL layer is highly complex, and stronger automated testing is needed. I plan to improve validation frameworks to reduce data or calculation issues.
 
+
+
+Provided base architectural design for the new RAE and Loan Inventory apps, helping the teams kick-start with a clear structure
