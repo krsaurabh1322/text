@@ -303,3 +303,9 @@ Estimation Accuracy & Roadmap Planning: Some cost and effort estimates lacked bu
 
 Strengthening SQL Testing Practices: The SQL layer carries complex business logic, and I believe more robust automated testing or SQL-specific validation frameworks are needed. I plan to enhance this area to further reduce data/number inconsistencies and strengthen overall reliability.
 
+
+
+Estimation & Planning: Some effort estimates lacked buffer and didn’t fully align with delivery velocity. I will refine estimation by factoring complexity and historical velocity more accurately.
+
+SQL Logic Testing: The SQL layer is highly complex, and stronger automated testing is needed. I plan to improve validation frameworks to reduce data or calculation issues.
+
