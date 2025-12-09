@@ -7,6 +7,58 @@ If you want it even shorter:
 “Completed all mandatory trainings on time; no conduct or risk issues Great — based on Sudhanshu’s self-reflection and your assessment, here are clean, professional write-ups for each section. You can paste them directly into the form.
 
 
+That's an excellent way to think about the physical implementation! To support the "Approval Escalation Report" and its calculated, daily updates, you would need to define several tables in your PostgreSQL backend.
+The main focus of these tables is to store the raw data pulled from LoansHub, the calculated exposure data, and the report metadata needed for the UI.
+Here is a proposal for the core PostgreSQL tables, designed to support the Exposure Calculation & Escalation Service (ECS) and the Reporting Service API.
+💾 PostgreSQL Table Design
+1. loan_exposure_raw (The Daily Pull)
+This table stores the snapshot of the required data pulled daily from the LoansHub source system.
+| Column Name | Data Type | Constraint | Description |
+|---|---|---|---|
+| id | BIGSERIAL | PRIMARY KEY | Unique ID for the row. |
+| loan_id | VARCHAR(50) | NOT NULL | The unique identifier for the loan (from LoansHub). |
+| post_signing_amount | NUMERIC(18, 2) | NOT NULL | The base amount for calculation. |
+| client_id | VARCHAR(50) | NOT NULL | The client associated with the loan. |
+| country | VARCHAR(100) | NOT NULL | The country of the client/loan. |
+| industry_code | VARCHAR(20) | NOT NULL | The industry code of the client. |
+| credit_rating | VARCHAR(20) | NOT NULL | Used to check 'non-investment grade' status. |
+| data_date | DATE | NOT NULL | The date this data was pulled (e.g., 2025-12-09). |
+2. sub_limit_reference (The Business Rules)
+This table stores the hardcoded limits that the ECS uses for checking breaches.
+| Column Name | Data Type | Constraint | Description |
+|---|---|---|---|
+| limit_id | SERIAL | PRIMARY KEY | Unique ID for the limit rule. |
+| limit_type | VARCHAR(50) | NOT NULL | E.g., 'COUNTRY', 'INDUSTRY'. |
+| limit_key | VARCHAR(100) | NOT NULL | The country name or industry code the limit applies to. |
+| max_exposure_usd | NUMERIC(18, 2) | NOT NULL | The maximum allowable exposure for this key. |
+| is_investment_grade | BOOLEAN | NOT NULL | TRUE if the limit applies to Investment Grade clients. |
+3. calculated_exposure_results (The Core Report Data)
+This table stores the final, aggregated results produced by the ECS and is the primary source for the Reporting Service API. This table is keyed by the unique combination of the limit and the day it was calculated.
+| Column Name | Data Type | Constraint | Description |
+|---|---|---|---|
+| result_id | BIGSERIAL | PRIMARY KEY | Unique ID for the result row. |
+| limit_key | VARCHAR(100) | NOT NULL | The country/industry code being tracked. |
+| limit_type | VARCHAR(50) | NOT NULL | 'COUNTRY' or 'INDUSTRY'. |
+| total_exposure_usd | NUMERIC(18, 2) | NOT NULL | The calculated total current exposure for this key. |
+| limit_threshold | NUMERIC(18, 2) | NOT NULL | The configured max limit (copied from sub_limit_reference). |
+| is_breached | BOOLEAN | NOT NULL | TRUE if total_exposure_usd > limit_threshold. |
+| breach_amount_usd | NUMERIC(18, 2) |  | How much the exposure exceeds the limit (NULL if not breached). |
+| calculation_date | DATE | NOT NULL | The date the calculation was run. |
+4. report_audit_log (The NFR/Email Tracking)
+This table satisfies the requirement for tracking when the report was run and which users were notified (supporting the NFR/Email component).
+| Column Name | Data Type | Constraint | Description |
+|---|---|---|---|
+| log_id | BIGSERIAL | PRIMARY KEY | Unique log ID. |
+| calculation_date | DATE | NOT NULL | Date the report was generated. |
+| report_version | VARCHAR(50) | NOT NULL | E.g., A hash or timestamp of the data to ensure report consistency. |
+| breach_count | INTEGER | NOT NULL | Total number of limits breached on this date. |
+| notification_sent_ts | TIMESTAMP | NOT NULL | Timestamp when emails/notifications were sent. |
+| sent_to_users | TEXT |  | Comma-separated list of committee members notified. |
+These four tables provide the structure for daily data ingestion, defining the rules, storing the calculated results for reporting, and auditing the notification process, thereby fully supporting the new automated architecture.
+Would you like to define the specific SQL commands for creating these tables, or detail the indexes you would use to optimize performance?
+
+
+
 ---
 
 1. Risk, Control and Conduct Commentary
