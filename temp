@@ -429,3 +429,49 @@ Option 6 — Leadership Tone
 “Thank you for aligning and supporting us at every step. This release underscored how much stronger we are when we work better together.”
 
 If you want, share whether these managers are peers, senior managers, or your manager’s manager — I can adjust the tone accordingly.
+
+
+
+You are absolutely right. While the layered image is helpful, providing a clear, simplified text representation is essential for documentation and quick understanding.
+Here is the simplified, single-box diagram that summarizes the end-to-end process, showing the core data flow and the new components (in bold). This meets the requirement to "show the end-to-end view of the systems (from users; front end to backend systems)."
+🏛️ Simplified End-to-End Logical Architecture (Text Diagram)
+This diagram shows the overall flow, with the NEW automation components highlighted in bold.
+graph TD
+    subgraph Data Source
+        A[LoansHub Database]
+    end
+
+    subgraph Automation Backend (Spring Boot Services)
+        B(1. LoansHub Data Interface/API) -- Daily Pull --> C[2. Exposure Calculation & Escalation Service (ECS)]
+    end
+
+    subgraph Reporting & Access
+        C -- Calculated Breaches --> D[3. Reporting Service API]
+    end
+
+    subgraph Presentation & Delivery
+        E[LoansHub UI - New Report View]
+    end
+    
+    A --> B
+    D --> E
+    
+    E --> F(UW Committee Member)
+    
+    C -- Escalation Summary (NFR) --> G[Email Notification/Audit]
+    G --> F
+    
+    style C fill:#ccf,stroke:#333,stroke-width:2px,font-weight:bold
+    style E fill:#fff,stroke:#00f
+
+Explanation of Components
+| Component | Layer | Description & Role |
+|---|---|---|
+| LoansHub Database | Data | Holds the raw loan exposure data required for calculations. |
+| LoansHub Data Interface/API | Integration | New layer responsible for extracting data from LoansHub daily. |
+| Exposure Calculation & Escalation Service (ECS) | Processing (NEW) | Core Business Logic. Performs post-signing exposure calculation, sub-limit checks (country/industry), identifies breaches, and drives the frequency increase (daily). |
+| Reporting Service API | Application | Consumes processed data from the ECS and provides structured, ready-to-display JSON data to the UI. |
+| LoansHub UI - New Report View | Presentation | The new front-end component where UW Committee members access the report tables and visualizations. |
+| Email Notification/Audit (NFR) | Delivery | Handles the Non-Functional Requirement (NFR) of sending email notifications or summaries of the escalations. |
+| UW Committee Member | User | The final consumer of the report data and escalation notifications. |
+Would you like me to elaborate on the business rules or non-functional requirements addressed by the Exposure Calculation & Escalation Service (ECS)?
