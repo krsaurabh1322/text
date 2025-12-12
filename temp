@@ -7,6 +7,246 @@ If you want it even shorter:
 “Completed all mandatory trainings on time; no conduct or risk issues Great — based on Sudhanshu’s self-reflection and your assessment, here are clean, professional write-ups for each section. You can paste them directly into the form.
 
 
+Here is the revised short technical write-up with an added section explicitly listing which tools/technologies are used at each layer.
+This is clean, enterprise-ready, and suitable for PPT or documentation.
+
+
+---
+
+Enterprise Data Quality Framework – Technical Overview (with Tools per Layer)
+
+The Data Quality Framework provides a centralized, rule-driven, auditable pipeline to ingest, validate, transform, and route data across multiple systems. It supports both real-time and batch workloads with full traceability, replay, and data correctness guarantees.
+
+
+---
+
+1. Ingestion Layer
+
+Purpose: Collect raw data from all upstream systems in a reliable, traceable way.
+
+Tools & Technologies:
+
+Apache NiFi – Primary ingestion and routing engine
+
+Solace / Kafka – Event streaming sources
+
+REST/API Gateway – For API ingest
+
+NiFi SFTP/FTP Processors – File polling
+
+JDBC Connectors – For DB extracts
+
+
+Responsibilities:
+
+Pull/push data from multiple external sources
+
+Standardize payload formats
+
+Record lineage & metadata
+
+Retry, backpressure, throttling
+
+Send data to Raw Zone
+
+
+
+---
+
+2. Data Storage Layer (Raw, Staging, Modular Zones)
+
+Tools & Technologies:
+
+PostgreSQL – Primary DQ database
+
+S3 / Object Storage (optional) – For large raw files
+
+Schema Registry (optional) – For schema consistency
+
+
+Zones:
+
+Raw Zone: Stores unprocessed data exactly as received
+
+Staging Zone: Stores validated and transformed data
+
+Modular/Master Zone: Application-ready curated datasets
+
+
+
+---
+
+3. Batch Processing & ETL Layer
+
+Purpose: Handle heavy transformations, scheduled jobs, and rule validation on large datasets.
+
+Tools & Technologies:
+
+Spring Batch – Core batch ETL engine
+
+Java Microservices (Spring Boot) – Custom processing logic
+
+Liquibase/Flyway – DB schema versioning
+
+Cron/Scheduler or Airflow – Job scheduling
+
+
+Responsibilities:
+
+Bulk data validation
+
+Multi-step ETL flows
+
+Parallel/partitioned processing
+
+Insert into staging & modular zones
+
+Push exceptions into error tables
+
+
+
+---
+
+4. Rules Engine (Data Quality & Business Rules Layer)
+
+Tools & Technologies:
+
+Drools Rule Engine – Central rule repository and evaluator
+
+Knowledge Base (KIE) – Rule versioning and deployment
+
+Spring Boot Rule Service – Exposing rule evaluation APIs
+
+
+Responsibilities:
+
+Validate completeness, formatting, domain values
+
+Apply referential integrity checks
+
+Row-level & cross-record validations
+
+Business rules (constraints, thresholds)
+
+Version-controlled rule updates
+
+
+
+---
+
+5. Exception, Error & Replay Management
+
+Tools & Technologies:
+
+NiFi FlowFile Replay – For ingestion-level recovery
+
+Spring Batch Retry/Skip Listeners – Batch-level recovery
+
+PostgreSQL Exception Tables – For rejected records
+
+Spring Boot Replay APIs – For user-triggered record-level reprocessing
+
+
+Responsibilities:
+
+Store all invalid records
+
+Provide detailed rejection reasons
+
+Enable replay at ingestion, batch, or record level
+
+Support manual intervention via APIs/UI
+
+
+
+---
+
+6. API & Integration Layer
+
+Purpose: Provide programmatic access to data quality metrics, rule management, and exception handling.
+
+Tools & Technologies:
+
+Spring Boot Microservices
+
+RESTful APIs / GraphQL (optional)
+
+JWT Authentication + OAuth2
+
+React UI – For dashboards and admin console
+
+
+Responsibilities:
+
+Expose DQ metrics
+
+Manage rules & versions
+
+Trigger replay
+
+Retrieve staging/master data for downstream systems
+
+
+
+---
+
+7. Monitoring, Logging & Observability Layer
+
+Tools & Technologies:
+
+NiFi Provenance Logs
+
+ELK Stack (Elasticsearch + Logstash + Kibana) or ECK
+
+Prometheus + Grafana – Real-time metrics
+
+Spring Actuator – App-level health & metrics
+
+Alerting (Slack, Teams, Email, PagerDuty)
+
+
+Responsibilities:
+
+Track flow lineage and performance
+
+Monitor job-level and rule-level metrics
+
+Alert when validation thresholds fail
+
+Provide dashboards for operational visibility
+
+
+
+---
+
+8. Summary of Tooling per Layer
+
+Layer	Tools / Technologies
+
+Ingestion	NiFi, Solace/Kafka, REST APIs, SFTP processors
+Data Storage	PostgreSQL, S3/Object Storage
+Batch/ETL	Spring Batch, Spring Boot, Airflow/Cron
+Rules Engine	Drools, KIE Workbench/Knowledge Base
+Exception & Replay	NiFi Replay, Spring Batch Retry, Postgres exception tables
+API Layer	Spring Boot Microservices, JWT, React
+Monitoring	NiFi Provenance, ELK, Prometheus, Grafana, Spring Actuator
+
+
+
+---
+
+If you want, I can now generate:
+
+📌 A polished PPT slide version
+📌 A single big architecture diagram image
+📌 A 1-page executive summary
+📌 A detailed 4–5 page architecture doc
+
+Just tell me which one you want next!
+
+
+
+
 That's an excellent way to think about the physical implementation! To support the "Approval Escalation Report" and its calculated, daily updates, you would need to define several tables in your PostgreSQL backend.
 The main focus of these tables is to store the raw data pulled from LoansHub, the calculated exposure data, and the report metadata needed for the UI.
 Here is a proposal for the core PostgreSQL tables, designed to support the Exposure Calculation & Escalation Service (ECS) and the Reporting Service API.
