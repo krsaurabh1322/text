@@ -955,3 +955,150 @@ If you want, I can now generate:
 📌 A detailed 4–5 page architecture doc
 
 Just tell me which one you want next!
+
+
+
+Here is a short, crisp, end-to-end data flow explaining exactly how data moves through each layer, where rules run, and how recovery/exception handling works.
+
+
+---
+
+End-to-End Data Flow (Crisp Summary)
+
+1. Ingestion Layer (NiFi)
+
+Data arrives from Solace, REST APIs, SFTP, or DB extracts.
+
+NiFi normalizes the incoming file/message and writes it to the Raw Zone.
+
+Every record is tracked with flow lineage, so failures can be replayed.
+
+
+Recovery:
+NiFi’s FlowFile Replay allows reprocessing failed messages/files without re-ingesting from the source.
+
+
+---
+
+2. Raw Zone → Validation Layer (Drools + Spring Batch)
+
+Once raw data is stored, NiFi triggers a Spring Batch job.
+
+Spring Batch reads raw records in chunks and calls the Drools rules engine for validation.
+
+Drools applies:
+
+Mandatory field checks
+
+Format/type checks
+
+Lookup & referential checks
+
+Cross-record/business rules
+
+
+
+Outcome of Each Record:
+
+Valid → Written to Staging Zone
+
+Invalid → Written to Exception Table with:
+
+Rule violated
+
+Error code and message
+
+Timestamp
+
+Trace ID / File ID
+
+
+
+Recovery:
+Spring Batch uses Retry, Skip, and Restartable jobs to continue from last commit point if job fails.
+
+
+---
+
+3. Staging Layer → Transformation Layer (Spring Batch / Microservices)
+
+For valid data, further transformations may occur—joins, enrichment, mapping.
+
+Additional business rules can be re-run through Drools if needed.
+
+
+Recovery:
+Batch checkpoints ensure re-runs do not duplicate processed data.
+
+
+---
+
+4. Modular/Master Layer (Final Clean Data)
+
+Fully validated and transformed data is loaded into modular/master tables.
+
+Downstream applications consume this data through Spring Boot APIs.
+
+
+
+---
+
+5. Exception Repository & Replay
+
+All invalid records are kept in the DQ_Exception_Log with full context.
+
+A Replay API (Spring Boot) allows:
+
+Reapplying Drools rules
+
+Reprocessing only failed records
+
+Updating corrected records back into staging/master
+
+
+
+Recovery:
+
+Supports record-level, file-level, and job-level replay.
+
+Operators can manually retry via API/UI without re-uploading original data.
+
+
+
+---
+
+6. Monitoring & Alerts
+
+NiFi tracks ingestion failures.
+
+Spring Batch logs rule failures and job failures.
+
+Prometheus/Grafana dashboards show DQ KPIs:
+
+Pass rate
+
+Exception count
+
+Rule violation distribution
+
+
+Alerts are sent via Slack/Email when rules breach thresholds.
+
+
+
+---
+
+Super-Crisp Data Flow Summary (One Paragraph)
+
+Data enters through NiFi, which standardizes it and stores it in the Raw Zone with full lineage. Spring Batch then processes this raw data in chunks and calls Drools to execute all data-quality rules. Valid records go to Staging, invalid records go to an Exception table with detailed rule violations. Batch checkpoints and NiFi replay ensure recovery at ingestion, record, and job levels. Final clean data moves to Modular/Master tables, while a Replay API allows selective reprocessing of failed records. Dashboards and alerts provide visibility into rule failures and data quality trends.
+
+
+---
+
+If you want, I can now turn this into:
+
+📌 A single slide
+📌 A 1-page architecture note
+📌 A diagram showing this sequence visually
+
+Just tell me!
