@@ -351,3 +351,394 @@ Explain why Kubernetes DNS alone vs Eureka
 
 
 Just tell me 👍
+
+
+
+Great — below is a complete, runnable sample you can open in IntelliJ, start locally, and see SSE working.
+I’ll keep the grid part mocked (console/log output) as requested, but the backend is realistic and production-aligned.
+
+
+---
+
+🎯 What this sample demonstrates
+
+✅ Spring Boot REST update
+✅ Redis Pub/Sub
+✅ SSE push to browser
+✅ Multiple users simulated
+✅ Ready to run in IntelliJ
+❌ No real ag-Grid (assumed)
+❌ No Kubernetes (local test first)
+
+Once this works, the same code runs in K8s with replicas.
+
+
+---
+
+🧱 Project Structure
+
+sse-demo/
+├── pom.xml
+└── src/main/java/com/example/ssedemo
+    ├── SseDemoApplication.java
+    ├── controller
+    │   ├── OrderController.java
+    │   └── SseController.java
+    ├── model
+    │   ├── GridEvent.java
+    │   └── Order.java
+    ├── service
+    │   └── OrderService.java
+    ├── sse
+    │   └── SseClientRegistry.java
+    └── redis
+        ├── RedisConfig.java
+        └── GridEventSubscriber.java
+
+
+---
+
+1️⃣ pom.xml (copy as-is)
+
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.example</groupId>
+  <artifactId>sse-demo</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.2.1</version>
+  </parent>
+
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+
+  <dependencies>
+    <!-- REST -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- Redis -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+
+    <!-- JSON -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+  </dependencies>
+
+</project>
+
+
+---
+
+2️⃣ Main Application
+
+@SpringBootApplication
+public class SseDemoApplication {
+  public static void main(String[] args) {
+    SpringApplication.run(SseDemoApplication.class, args);
+  }
+}
+
+
+---
+
+3️⃣ Model Classes
+
+Order (mocked DB entity)
+
+public class Order {
+  private Long id;
+  private String status;
+
+  public Order(Long id, String status) {
+    this.id = id;
+    this.status = status;
+  }
+
+  public Long getId() { return id; }
+  public String getStatus() { return status; }
+}
+
+
+---
+
+GridEvent (what gets pushed)
+
+public class GridEvent {
+  private String dataset;
+  private String action;
+  private Order row;
+
+  public GridEvent() {}
+
+  public GridEvent(String dataset, String action, Order row) {
+    this.dataset = dataset;
+    this.action = action;
+    this.row = row;
+  }
+
+  public String getDataset() { return dataset; }
+  public String getAction() { return action; }
+  public Order getRow() { return row; }
+}
+
+
+---
+
+4️⃣ SSE Client Registry
+
+@Component
+public class SseClientRegistry {
+
+  private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
+
+  public SseEmitter register(String dataset) {
+    SseEmitter emitter = new SseEmitter(0L);
+
+    emitters.computeIfAbsent(dataset, k -> new CopyOnWriteArrayList<>())
+            .add(emitter);
+
+    emitter.onCompletion(() -> remove(dataset, emitter));
+    emitter.onTimeout(() -> remove(dataset, emitter));
+    emitter.onError(e -> remove(dataset, emitter));
+
+    return emitter;
+  }
+
+  public void send(String dataset, Object event) {
+    List<SseEmitter> list = emitters.get(dataset);
+    if (list == null) return;
+
+    for (SseEmitter emitter : list) {
+      try {
+        emitter.send(SseEmitter.event().data(event));
+      } catch (Exception e) {
+        remove(dataset, emitter);
+      }
+    }
+  }
+
+  private void remove(String dataset, SseEmitter emitter) {
+    emitters.getOrDefault(dataset, List.of()).remove(emitter);
+  }
+}
+
+
+---
+
+5️⃣ SSE Controller
+
+@RestController
+@RequestMapping("/api/stream")
+public class SseController {
+
+  private final SseClientRegistry registry;
+
+  public SseController(SseClientRegistry registry) {
+    this.registry = registry;
+  }
+
+  @GetMapping(value = "/{dataset}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+  public SseEmitter stream(@PathVariable String dataset) {
+    return registry.register(dataset);
+  }
+}
+
+
+---
+
+6️⃣ Redis Configuration
+
+@Configuration
+public class RedisConfig {
+
+  @Bean
+  RedisMessageListenerContainer container(
+      RedisConnectionFactory factory,
+      MessageListenerAdapter adapter) {
+
+    RedisMessageListenerContainer container = new RedisMessageListenerContainer();
+    container.setConnectionFactory(factory);
+    container.addMessageListener(adapter, new PatternTopic("grid-events"));
+    return container;
+  }
+
+  @Bean
+  MessageListenerAdapter adapter(GridEventSubscriber subscriber) {
+    return new MessageListenerAdapter(subscriber);
+  }
+}
+
+
+---
+
+7️⃣ Redis Subscriber → SSE
+
+@Component
+public class GridEventSubscriber {
+
+  private final SseClientRegistry registry;
+  private final ObjectMapper mapper = new ObjectMapper();
+
+  public GridEventSubscriber(SseClientRegistry registry) {
+    this.registry = registry;
+  }
+
+  public void handleMessage(String message) throws Exception {
+    GridEvent event = mapper.readValue(message, GridEvent.class);
+    registry.send(event.getDataset(), event);
+  }
+}
+
+
+---
+
+8️⃣ Order Service (Mock DB + Redis publish)
+
+@Service
+public class OrderService {
+
+  private final StringRedisTemplate redis;
+  private final ObjectMapper mapper = new ObjectMapper();
+
+  public OrderService(StringRedisTemplate redis) {
+    this.redis = redis;
+  }
+
+  public void updateOrder(Long id, String status) throws Exception {
+    // Mock DB update
+    Order order = new Order(id, status);
+
+    GridEvent event = new GridEvent("ORDERS", "UPDATE", order);
+
+    redis.convertAndSend(
+        "grid-events",
+        mapper.writeValueAsString(event)
+    );
+  }
+}
+
+
+---
+
+9️⃣ REST Controller (User A)
+
+@RestController
+@RequestMapping("/api/orders")
+public class OrderController {
+
+  private final OrderService service;
+
+  public OrderController(OrderService service) {
+    this.service = service;
+  }
+
+  @PutMapping("/{id}")
+  public void update(
+      @PathVariable Long id,
+      @RequestParam String status) throws Exception {
+
+    service.updateOrder(id, status);
+  }
+}
+
+
+---
+
+🔟 Run Redis Locally
+
+docker run -p 6379:6379 redis
+
+
+---
+
+🧪 How to Test (VERY IMPORTANT)
+
+Step 1: Start app in IntelliJ
+
+Run SseDemoApplication
+
+
+---
+
+Step 2: Open two browser tabs
+
+Tab A & B:
+
+http://localhost:8080/api/stream/ORDERS
+
+(You’ll see nothing — connection stays open)
+
+
+---
+
+Step 3: Trigger update (User A)
+
+curl -X PUT "http://localhost:8080/api/orders/1?status=SHIPPED"
+
+
+---
+
+Step 4: Observe result
+
+Both tabs receive:
+
+{
+  "dataset":"ORDERS",
+  "action":"UPDATE",
+  "row":{"id":1,"status":"SHIPPED"}
+}
+
+🎉 That is your shared grid update
+
+
+---
+
+🧠 How this maps to ag-Grid later
+
+Replace browser tab with React:
+
+const source = new EventSource("/api/stream/ORDERS");
+source.onmessage = e => {
+  const event = JSON.parse(e.data);
+  gridApi.applyTransaction({ update: [event.row] });
+};
+
+
+---
+
+🚀 What you have now
+
+✔ Enterprise-grade pattern
+✔ Kubernetes-ready
+✔ Redis-backed fan-out
+✔ Stateless services
+✔ Easy to extend with Feign, Eureka, Circuit Breakers
+
+
+---
+
+If you want next, I can:
+
+Add Feign + Eureka + Circuit Breaker
+
+Convert to WebFlux
+
+Add auth + user isolation
+
+Provide Helm values
+
+
+Just say the word 👍
