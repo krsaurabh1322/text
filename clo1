@@ -645,3 +645,417 @@ Let me know if you want a JPA code example or REST contract design for this.
 
 
 
+============================
+
+Thanks — this clarification helps a lot. Your rule is now clear and actually simpler than the previous interpretation.
+
+Key principles of your design:
+
+1. A hedge request does NOT belong to a cycle.
+
+
+2. Once created in CLO_HEDGE, it remains OPEN until:
+
+fully allocated, or
+
+dropped via a DROP extension request.
+
+
+
+3. The same hedge request participates in multiple replenishment cycles until its amount is exhausted.
+
+
+4. Extension requests are new hedge requests tied only by loan_id, not by hedge_id.
+
+
+5. DROP extension request operates at loan level, and closes all open hedge requests for that loan.
+
+
+6. Allocation ledger continues using positive and negative transactions.
+
+
+
+So the lifecycle becomes:
+
+Loan L1
+   |
+   |--- H1 (hedge 10)
+   |--- H2 (extension increase 5)
+   |--- H3 (extension reduce 3)
+   |--- H4 (drop loan)
+
+And H1 and H2 remain active across cycles until utilized.
+
+
+---
+
+1. Final Data Model
+
+Loan Table
+
+CREATE TABLE CLO_LOAN (
+    loan_id VARCHAR(50) PRIMARY KEY,
+    loan_amount DECIMAL(18,2),
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+---
+
+Hedge Request Table
+
+This table stores all hedge requests permanently.
+
+CREATE TABLE CLO_HEDGE (
+
+    hedge_id VARCHAR(50) PRIMARY KEY,
+
+    loan_id VARCHAR(50) NOT NULL,
+
+    req_type VARCHAR(20), 
+    -- NEW / EXTENSION
+
+    extension_type VARCHAR(30), 
+    -- INCREASE / REDUCE / DROP_LOAN
+
+    reqd_hedge_amt DECIMAL(18,2),
+
+    utilized_amt DECIMAL(18,2) DEFAULT 0,
+
+    unutilized_amt DECIMAL(18,2),
+
+    hedge_deadline_date DATE,
+
+    status VARCHAR(20) DEFAULT 'OPEN',
+    -- OPEN / CLOSED
+
+    camunda_process_id VARCHAR(100),
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (loan_id) REFERENCES CLO_LOAN(loan_id)
+);
+
+Rule:
+
+unutilized_amt = reqd_hedge_amt - utilized_amt
+
+
+---
+
+Program Table
+
+CREATE TABLE CLO_PROGRAM (
+    program_id VARCHAR(50) PRIMARY KEY,
+    program_name VARCHAR(100),
+    active_flag BOOLEAN DEFAULT TRUE
+);
+
+
+---
+
+Allocation Ledger Table
+
+CREATE TABLE CLO_HEDGE_ALLOCATIONS (
+
+    allocation_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    hedge_id VARCHAR(50) NOT NULL,
+
+    program_id VARCHAR(50) NOT NULL,
+
+    amount DECIMAL(18,2),
+
+    txn_type VARCHAR(20),
+    -- ALLOCATE / REDUCE / DROP
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+Ledger logic:
+
++ amount = allocation
+- amount = deallocation
+
+
+---
+
+Replenishment Cycle Table
+
+CREATE TABLE CLO_REPLENISHMENT_CYCLE (
+
+    cycle_id VARCHAR(50) PRIMARY KEY,
+
+    cycle_start_date DATE,
+    stop_request_date DATE,
+    freeze_date DATE,
+    closure_date DATE,
+
+    cycle_status VARCHAR(20)
+);
+
+Note: cycles are used only for process timing, not ownership of hedge requests.
+
+
+---
+
+2. How Hedges Participate in Multiple Cycles
+
+When a new cycle starts:
+
+Eligible hedges are:
+
+SELECT *
+FROM CLO_HEDGE
+WHERE status='OPEN'
+AND unutilized_amt > 0
+AND hedge_deadline_date >= CURRENT_DATE;
+
+Those hedges enter the allocation pool.
+
+
+---
+
+3. Example Scenario
+
+Loan:
+
+Loan L1 = 100
+
+
+---
+
+Case 1 — New Hedge Request
+
+Create hedge request:
+
+H1 = hedge 10
+
+SQL:
+
+INSERT INTO CLO_HEDGE
+(hedge_id,loan_id,req_type,reqd_hedge_amt,utilized_amt,unutilized_amt)
+VALUES
+('H1','L1','NEW',10,0,10);
+
+
+---
+
+Allocation in Cycle 1
+
+Allocate:
+
+P1 = 4
+P2 = 3
+
+Ledger:
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id,program_id,amount,txn_type)
+VALUES
+('H1','P1',4,'ALLOCATE');
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id,program_id,amount,txn_type)
+VALUES
+('H1','P2',3,'ALLOCATE');
+
+Update hedge:
+
+utilized = 7
+unutilized = 3
+
+H1 remains OPEN.
+
+
+---
+
+Case 2 — Next Cycle Allocation
+
+Cycle 2 begins.
+
+H1 still eligible:
+
+unutilized = 3
+
+Allocate:
+
+P3 = 3
+
+Ledger:
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id,program_id,amount,txn_type)
+VALUES
+('H1','P3',3,'ALLOCATE');
+
+Update hedge:
+
+utilized = 10
+unutilized = 0
+
+Then close:
+
+UPDATE CLO_HEDGE
+SET status='CLOSED'
+WHERE hedge_id='H1';
+
+
+---
+
+Case 3 — Extension Increase
+
+Cycle 2:
+
+H2
+Loan L1
+Increase 5
+
+SQL:
+
+INSERT INTO CLO_HEDGE
+(hedge_id,loan_id,req_type,extension_type,reqd_hedge_amt,unutilized_amt)
+VALUES
+('H2','L1','EXTENSION','INCREASE',5,5);
+
+H2 behaves like a new hedge request.
+
+
+---
+
+Case 4 — Extension Reduce
+
+Cycle 3:
+
+H3
+Reduce 2
+
+SQL:
+
+INSERT INTO CLO_HEDGE
+(hedge_id,loan_id,req_type,extension_type,reqd_hedge_amt)
+VALUES
+('H3','L1','EXTENSION','REDUCE',2);
+
+If needed, system reduces allocations using ledger:
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id,program_id,amount,txn_type)
+VALUES
+('H2','P1',-2,'REDUCE');
+
+
+---
+
+Case 5 — Drop Loan
+
+Cycle 4:
+
+H4
+DROP_LOAN
+
+SQL:
+
+INSERT INTO CLO_HEDGE
+(hedge_id,loan_id,req_type,extension_type)
+VALUES
+('H4','L1','EXTENSION','DROP_LOAN');
+
+Reverse all allocations:
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id,program_id,amount,txn_type)
+
+SELECT
+a.hedge_id,
+a.program_id,
+- SUM(a.amount),
+'DROP'
+
+FROM CLO_HEDGE_ALLOCATIONS a
+JOIN CLO_HEDGE h
+ON a.hedge_id = h.hedge_id
+
+WHERE h.loan_id='L1'
+AND h.status='OPEN'
+
+GROUP BY a.hedge_id,a.program_id;
+
+Close hedges:
+
+UPDATE CLO_HEDGE
+SET status='CLOSED'
+WHERE loan_id='L1'
+AND status='OPEN';
+
+
+---
+
+4. Process Flow
+
+Hedge Allocation Flow
+
+User
+ |
+Create Hedge Request
+ |
+API
+ |
+CLO_HEDGE
+ |
+Camunda Workflow
+ |
+Approved
+ |
+Eligible Pool
+ |
+Allocation Engine
+ |
+CLO_HEDGE_ALLOCATIONS
+ |
+Update Hedge Utilization
+
+
+---
+
+Drop Loan Flow
+
+User
+ |
+Create DROP Extension
+ |
+API
+ |
+CLO_HEDGE
+ |
+Find all OPEN hedges for loan
+ |
+Reverse allocations
+ |
+Close hedges
+ |
+Loan status DROPPED
+
+
+---
+
+5. Why This Design Matches Your Requirements
+
+This version supports:
+
+✔ hedge requests surviving across cycles
+✔ partial allocation across cycles
+✔ extension requests independent
+✔ loan-level drop logic
+✔ ledger-style audit trail
+✔ immutable historical requests
+
+
+---
+
+If you'd like, I can also show you one important missing table almost every production CLO hedging system adds: a CYCLE_ALLOCATION table, which prevents allocations being accidentally reprocessed across cycles and simplifies reporting like “what happened in Cycle 6?”.
+
+
+
+
