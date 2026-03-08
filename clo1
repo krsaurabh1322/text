@@ -1058,4 +1058,548 @@ If you'd like, I can also show you one important missing table almost every prod
 
 
 
+====≠==============
+
+Below is a clean final design for a manual allocation CLO hedge system optimized for fast allocation queries, while still supporting:
+
+manual allocation
+
+extensions (increase / reduce / drop loan)
+
+partial allocations across cycles
+
+leftover hedge carried to next cycle
+
+cycle closure rules
+
+
+I’ll structure it in 5 sections so it is easy to implement.
+
+1️⃣ Optimized table model
+2️⃣ Full SQL schema with relationships
+3️⃣ Allocation performance trick (important)
+4️⃣ Process flows (NEW + EXTENSIONS)
+5️⃣ Cycle flow showing leftover hedge participation
+
+
+---
+
+1. Optimized Data Model (Manual Allocation System)
+
+Core idea:
+
+Instead of calculating allocations every time from ledger, we maintain utilization in CLO_HEDGE table.
+
+This makes allocation lookup O(1).
+
+Core tables:
+
+CLO_LOAN
+   |
+   | 1
+   |
+   |------< CLO_HEDGE
+                 |
+                 | 1
+                 |
+                 |------< CLO_HEDGE_ALLOCATIONS
+                 |
+                 |------< CLO_HEDGE_EXTENSION_EVENTS
+                 
+CLO_PROGRAM
+   |
+   |------< CLO_HEDGE_ALLOCATIONS
+
+CLO_REPLENISHMENT_CYCLE
+
+
+---
+
+2. SQL Schema (Final Version)
+
+LOAN TABLE
+
+CREATE TABLE CLO_LOAN (
+
+    loan_id VARCHAR(50) PRIMARY KEY,
+
+    loan_amount DECIMAL(18,2),
+
+    loan_status VARCHAR(20) DEFAULT 'ACTIVE',
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+---
+
+PROGRAM TABLE
+
+CREATE TABLE CLO_PROGRAM (
+
+    program_id VARCHAR(50) PRIMARY KEY,
+
+    program_name VARCHAR(100),
+
+    program_capacity DECIMAL(18,2),
+
+    active_flag BOOLEAN DEFAULT TRUE
+);
+
+
+---
+
+REPLENISHMENT CYCLE
+
+Tracks cycle schedule.
+
+CREATE TABLE CLO_REPLENISHMENT_CYCLE (
+
+    cycle_id VARCHAR(50) PRIMARY KEY,
+
+    cycle_start_date DATE,
+
+    stop_request_date DATE,
+
+    freeze_date DATE,
+
+    closure_date DATE,
+
+    cycle_status VARCHAR(20)
+);
+
+
+---
+
+HEDGE REQUEST TABLE
+
+Stores all hedge requests.
+
+CREATE TABLE CLO_HEDGE (
+
+    hedge_id VARCHAR(50) PRIMARY KEY,
+
+    loan_id VARCHAR(50) NOT NULL,
+
+    req_type VARCHAR(20), 
+    -- NEW / EXTENSION
+
+    extension_type VARCHAR(30),
+    -- INCREASE / REDUCE / DROP_LOAN
+
+    reqd_hedge_amt DECIMAL(18,2),
+
+    utilized_amt DECIMAL(18,2) DEFAULT 0,
+
+    unutilized_amt DECIMAL(18,2),
+
+    hedge_deadline_date DATE,
+
+    status VARCHAR(20) DEFAULT 'OPEN',
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    version_no INT DEFAULT 1,
+
+    FOREIGN KEY (loan_id) REFERENCES CLO_LOAN(loan_id)
+);
+
+Rule maintained:
+
+unutilized_amt = reqd_hedge_amt - utilized_amt
+
+
+---
+
+HEDGE ALLOCATION LEDGER
+
+Tracks manual allocations.
+
+CREATE TABLE CLO_HEDGE_ALLOCATIONS (
+
+    allocation_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    hedge_id VARCHAR(50) NOT NULL,
+
+    program_id VARCHAR(50) NOT NULL,
+
+    amount DECIMAL(18,2),
+
+    txn_type VARCHAR(20),
+    -- ALLOCATE / REDUCE / DROP
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (hedge_id) REFERENCES CLO_HEDGE(hedge_id),
+
+    FOREIGN KEY (program_id) REFERENCES CLO_PROGRAM(program_id)
+);
+
+Ledger pattern:
+
++ve = allocation
+-ve = reduction
+
+
+---
+
+EXTENSION EVENT TABLE (optional but recommended)
+
+Keeps extension history clean.
+
+CREATE TABLE CLO_HEDGE_EXTENSION_EVENTS (
+
+    event_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    loan_id VARCHAR(50),
+
+    extension_type VARCHAR(30),
+
+    extension_amt DECIMAL(18,2),
+
+    created_cycle_id VARCHAR(50),
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (loan_id) REFERENCES CLO_LOAN(loan_id),
+
+    FOREIGN KEY (created_cycle_id) REFERENCES CLO_REPLENISHMENT_CYCLE(cycle_id)
+);
+
+
+---
+
+3. Performance Trick for Fast Allocation
+
+Instead of scanning allocation ledger every time, we rely on:
+
+unutilized_amt
+
+Query used by UI:
+
+SELECT
+hedge_id,
+loan_id,
+unutilized_amt
+FROM CLO_HEDGE
+WHERE loan_id = :loan_id
+AND status='OPEN'
+AND unutilized_amt > 0
+ORDER BY created_date;
+
+This is extremely fast because of index.
+
+Index
+
+CREATE INDEX IDX_HEDGE_OPEN_POOL
+ON CLO_HEDGE(loan_id, status, unutilized_amt);
+
+No ledger scanning required.
+
+
+---
+
+4. Flow for Each Request Type
+
+
+---
+
+A. NEW HEDGE REQUEST
+
+User wants hedge.
+
+Example:
+
+Loan L1
+Hedge = 10
+
+Step 1
+
+Insert hedge.
+
+INSERT INTO CLO_HEDGE
+(hedge_id, loan_id, req_type, reqd_hedge_amt, utilized_amt, unutilized_amt)
+VALUES
+('H1','L1','NEW',10,0,10);
+
+
+---
+
+Step 2
+
+Camunda approval.
+
+
+---
+
+Step 3
+
+Hedge enters allocation pool.
+
+Pool:
+
+H1 = 10
+
+
+---
+
+B. MANUAL ALLOCATION
+
+User allocates hedge.
+
+Example:
+
+Program P1
+Allocate 6
+
+Insert ledger:
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id, program_id, amount, txn_type)
+VALUES
+('H1','P1',6,'ALLOCATE');
+
+Update hedge:
+
+UPDATE CLO_HEDGE
+SET utilized_amt = utilized_amt + 6,
+    unutilized_amt = unutilized_amt - 6
+WHERE hedge_id='H1';
+
+Result:
+
+H1 remaining = 4
+
+
+---
+
+C. EXTENSION – INCREASE
+
+Example:
+
+Increase hedge by 5
+
+Create new hedge request.
+
+INSERT INTO CLO_HEDGE
+(hedge_id, loan_id, req_type, extension_type, reqd_hedge_amt, utilized_amt, unutilized_amt)
+VALUES
+('H2','L1','EXTENSION','INCREASE',5,0,5);
+
+Pool becomes:
+
+H1 = 4
+H2 = 5
+
+
+---
+
+D. EXTENSION – REDUCE
+
+Example:
+
+Reduce hedge exposure by 3
+
+Create extension record:
+
+INSERT INTO CLO_HEDGE_EXTENSION_EVENTS
+(loan_id, extension_type, extension_amt)
+VALUES
+('L1','REDUCE',3);
+
+User selects allocations to reduce.
+
+Example reduction:
+
+H1 P1 = -3
+
+Ledger:
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+VALUES
+(DEFAULT,'H1','P1',-3,'REDUCE',CURRENT_TIMESTAMP);
+
+Update hedge:
+
+utilized = 3
+unutilized = 7
+
+
+---
+
+E. EXTENSION – DROP LOAN
+
+Example:
+
+Loan L1 dropped
+
+Steps:
+
+Step 1
+
+Find all allocations.
+
+loan L1
+
+
+---
+
+Step 2
+
+Reverse allocations.
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id, program_id, amount, txn_type)
+
+SELECT
+a.hedge_id,
+a.program_id,
+- SUM(a.amount),
+'DROP'
+
+FROM CLO_HEDGE_ALLOCATIONS a
+JOIN CLO_HEDGE h
+ON a.hedge_id = h.hedge_id
+
+WHERE h.loan_id='L1'
+
+GROUP BY a.hedge_id,a.program_id;
+
+
+---
+
+Step 3
+
+Close hedges.
+
+UPDATE CLO_HEDGE
+SET status='CLOSED'
+WHERE loan_id='L1';
+
+
+---
+
+5. Cycle Flow (Including Leftover Hedge)
+
+Cycle timeline:
+
+Cycle Start
+   |
+   | Accept hedge requests
+   |
+Stop Request Cutoff
+   |
+Data Freeze
+   |
+Allocation Discussions
+   |
+Cycle Closure
+
+
+---
+
+Example with Leftover Hedge
+
+Loan L1
+
+Cycle 1
+
+H1 = 10
+
+Allocation:
+
+P1 = 6
+
+Remaining:
+
+H1 = 4
+
+Cycle closes.
+
+H1 remains OPEN.
+
+
+---
+
+Cycle 2
+
+Eligible hedges query:
+
+SELECT *
+FROM CLO_HEDGE
+WHERE status='OPEN'
+AND unutilized_amt > 0;
+
+Pool:
+
+H1 = 4
+
+Extension increase arrives.
+
+H2 = 5
+
+Pool becomes:
+
+H1 = 4
+H2 = 5
+
+Allocation continues.
+
+
+---
+
+Cycle 3
+
+If H1 fully allocated:
+
+unutilized_amt = 0
+
+System closes hedge:
+
+UPDATE CLO_HEDGE
+SET status='CLOSED'
+WHERE hedge_id='H1';
+
+
+---
+
+Final Cycle Participation Logic
+
+Eligible hedges for each cycle:
+
+status = OPEN
+unutilized_amt > 0
+deadline >= today
+
+These automatically participate in next cycle.
+
+
+---
+
+Final System Behaviour
+
+Supports:
+
+✔ manual allocation
+✔ split allocations across programs
+✔ hedge carry forward across cycles
+✔ extension adjustments
+✔ drop loan reversal
+✔ fast allocation lookup
+
+
+---
+
+If you want, I can also show you one extremely useful reporting view banks always create for this type of system:
+
+loan exposure
+vs
+hedge coverage
+vs
+program allocation
+
+It becomes a single SQL view that replaces 20+ complex queries and is extremely useful for traders and risk teams.
+
+
+
 
