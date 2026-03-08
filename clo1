@@ -1602,4 +1602,514 @@ It becomes a single SQL view that replaces 20+ complex queries and is extremely 
 
 
 
+====================
+
+
+
+
+
+
+
+
+Below is the complete alternative design where utilization is NOT stored in CLO_HEDGE but derived from CLO_HEDGE_ALLOCATIONS ledger.
+This is actually the more “accounting-correct” model used in many financial systems because:
+
+All balances are derived from transaction ledger
+
+No risk of mismatch between allocation table and hedge table
+
+Fully auditable
+
+
+Trade-off: allocation queries require aggregation (but we can optimize with indexes or views).
+
+I’ll structure the full design clearly.
+
+
+---
+
+1. Concept of Ledger-Based Utilization
+
+In this design:
+
+CLO_HEDGE = requested hedge
+CLO_HEDGE_ALLOCATIONS = ledger
+
+Utilization is calculated as:
+
+utilized_amt = SUM(allocation.amount)
+
+unutilized_amt = reqd_hedge_amt - utilized_amt
+
+Example:
+
+hedge	req_amt
+
+H1	10
+
+
+Ledger:
+
+hedge	amount
+
+H1	+6
+H1	-2
+
+
+Utilized:
+
+6 - 2 = 4
+
+Remaining:
+
+10 - 4 = 6
+
+
+---
+
+2. Table Relationship Diagram
+
+CLO_LOAN
+   |
+   | 1
+   |
+   |------< CLO_HEDGE
+                 |
+                 | 1
+                 |
+                 |------< CLO_HEDGE_ALLOCATIONS
+                 
+CLO_PROGRAM
+   |
+   |------< CLO_HEDGE_ALLOCATIONS
+
+CLO_REPLENISHMENT_CYCLE
+
+
+---
+
+3. SQL Schema
+
+
+---
+
+LOAN TABLE
+
+CREATE TABLE CLO_LOAN (
+
+    loan_id VARCHAR(50) PRIMARY KEY,
+
+    loan_amount DECIMAL(18,2),
+
+    loan_status VARCHAR(20) DEFAULT 'ACTIVE',
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+---
+
+PROGRAM TABLE
+
+CREATE TABLE CLO_PROGRAM (
+
+    program_id VARCHAR(50) PRIMARY KEY,
+
+    program_name VARCHAR(100),
+
+    program_capacity DECIMAL(18,2),
+
+    active_flag BOOLEAN DEFAULT TRUE
+);
+
+
+---
+
+REPLENISHMENT CYCLE
+
+CREATE TABLE CLO_REPLENISHMENT_CYCLE (
+
+    cycle_id VARCHAR(50) PRIMARY KEY,
+
+    cycle_start_date DATE,
+
+    stop_request_date DATE,
+
+    freeze_date DATE,
+
+    closure_date DATE,
+
+    cycle_status VARCHAR(20)
+);
+
+
+---
+
+HEDGE REQUEST TABLE
+
+Notice no utilization columns here.
+
+CREATE TABLE CLO_HEDGE (
+
+    hedge_id VARCHAR(50) PRIMARY KEY,
+
+    loan_id VARCHAR(50) NOT NULL,
+
+    req_type VARCHAR(20),
+
+    extension_type VARCHAR(30),
+
+    reqd_hedge_amt DECIMAL(18,2),
+
+    hedge_deadline_date DATE,
+
+    status VARCHAR(20) DEFAULT 'OPEN',
+
+    created_cycle_id VARCHAR(50),
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (loan_id) REFERENCES CLO_LOAN(loan_id),
+
+    FOREIGN KEY (created_cycle_id) REFERENCES CLO_REPLENISHMENT_CYCLE(cycle_id)
+);
+
+
+---
+
+HEDGE ALLOCATION LEDGER
+
+CREATE TABLE CLO_HEDGE_ALLOCATIONS (
+
+    allocation_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    hedge_id VARCHAR(50) NOT NULL,
+
+    program_id VARCHAR(50) NOT NULL,
+
+    amount DECIMAL(18,2),
+
+    txn_type VARCHAR(20),
+
+    created_cycle_id VARCHAR(50),
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (hedge_id) REFERENCES CLO_HEDGE(hedge_id),
+
+    FOREIGN KEY (program_id) REFERENCES CLO_PROGRAM(program_id),
+
+    FOREIGN KEY (created_cycle_id) REFERENCES CLO_REPLENISHMENT_CYCLE(cycle_id)
+);
+
+Ledger rules:
+
+ALLOCATE = positive
+REDUCE   = negative
+DROP     = negative
+
+
+---
+
+4. Derived Utilization View
+
+This view gives current hedge balance instantly.
+
+CREATE VIEW VW_HEDGE_UTILIZATION AS
+
+SELECT
+h.hedge_id,
+h.loan_id,
+h.reqd_hedge_amt,
+
+COALESCE(SUM(a.amount),0) AS utilized_amt,
+
+h.reqd_hedge_amt - COALESCE(SUM(a.amount),0) AS unutilized_amt
+
+FROM CLO_HEDGE h
+
+LEFT JOIN CLO_HEDGE_ALLOCATIONS a
+ON h.hedge_id = a.hedge_id
+
+GROUP BY
+h.hedge_id,
+h.loan_id,
+h.reqd_hedge_amt;
+
+
+---
+
+5. Query Used by Allocation Screen
+
+SELECT
+h.hedge_id,
+h.loan_id,
+u.unutilized_amt
+
+FROM CLO_HEDGE h
+JOIN VW_HEDGE_UTILIZATION u
+ON h.hedge_id = u.hedge_id
+
+WHERE
+h.status='OPEN'
+AND u.unutilized_amt > 0
+ORDER BY h.created_date;
+
+
+---
+
+6. Manual Allocation Flow
+
+User allocates hedge.
+
+Example:
+
+Loan L1
+H1 = 10
+
+Allocate:
+
+Program P1 = 6
+
+Insert ledger entry.
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id, program_id, amount, txn_type, created_cycle_id)
+VALUES
+('H1','P1',6,'ALLOCATE','C1');
+
+Utilization automatically becomes:
+
+utilized = 6
+remaining = 4
+
+
+---
+
+7. Extension Flow
+
+
+---
+
+EXTENSION — INCREASE
+
+Example:
+
+increase hedge by 5
+
+Create new hedge request.
+
+INSERT INTO CLO_HEDGE
+(hedge_id, loan_id, req_type, extension_type, reqd_hedge_amt)
+VALUES
+('H2','L1','EXTENSION','INCREASE',5);
+
+Pool now:
+
+H1 remaining = 4
+H2 remaining = 5
+
+
+---
+
+EXTENSION — REDUCE
+
+Example:
+
+reduce exposure by 3
+
+User reduces allocations.
+
+Ledger entry:
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id, program_id, amount, txn_type)
+VALUES
+('H1','P1',-3,'REDUCE');
+
+Utilization recalculated:
+
+6 - 3 = 3
+
+Remaining:
+
+10 - 3 = 7
+
+
+---
+
+EXTENSION — DROP LOAN
+
+Steps.
+
+1 Find allocations
+
+SELECT
+a.hedge_id,
+a.program_id,
+SUM(a.amount)
+
+FROM CLO_HEDGE_ALLOCATIONS a
+JOIN CLO_HEDGE h
+ON a.hedge_id = h.hedge_id
+
+WHERE h.loan_id='L1'
+
+GROUP BY
+a.hedge_id,
+a.program_id;
+
+
+---
+
+2 Reverse them
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id, program_id, amount, txn_type)
+
+SELECT
+a.hedge_id,
+a.program_id,
+- SUM(a.amount),
+'DROP'
+
+FROM CLO_HEDGE_ALLOCATIONS a
+JOIN CLO_HEDGE h
+ON a.hedge_id = h.hedge_id
+
+WHERE h.loan_id='L1'
+
+GROUP BY
+a.hedge_id,
+a.program_id;
+
+
+---
+
+3 Close hedges
+
+UPDATE CLO_HEDGE
+SET status='CLOSED'
+WHERE loan_id='L1';
+
+
+---
+
+8. Cycle Participation Logic
+
+Each cycle selects hedges with remaining exposure.
+
+SELECT *
+FROM VW_HEDGE_UTILIZATION u
+JOIN CLO_HEDGE h
+ON u.hedge_id = h.hedge_id
+
+WHERE
+h.status='OPEN'
+AND u.unutilized_amt > 0;
+
+Those hedges participate in next cycle allocation.
+
+
+---
+
+Example Across Cycles
+
+Cycle 1
+
+H1 = 10
+Allocate = 6
+Remaining = 4
+
+Cycle closes.
+
+
+---
+
+Cycle 2
+
+Eligible hedges:
+
+H1 = 4
+
+Extension arrives.
+
+H2 = 5
+
+Pool:
+
+H1 = 4
+H2 = 5
+
+Allocation continues.
+
+
+---
+
+9. Performance Optimization
+
+Indexes:
+
+CREATE INDEX IDX_HEDGE_LOAN
+ON CLO_HEDGE(loan_id, status);
+
+CREATE INDEX IDX_ALLOC_HEDGE
+ON CLO_HEDGE_ALLOCATIONS(hedge_id);
+
+CREATE INDEX IDX_ALLOC_CYCLE
+ON CLO_HEDGE_ALLOCATIONS(created_cycle_id);
+
+These make utilization view fast.
+
+
+---
+
+10. When This Ledger Design Is Better
+
+Choose this version when:
+
+✔ audit trail is critical
+✔ allocations frequently change
+✔ regulators require ledger accounting
+✔ reconciliation is important
+
+
+---
+
+When Previous Design Is Faster
+
+The earlier design (with utilization stored in CLO_HEDGE) is faster when:
+
+✔ very high allocation volume
+✔ heavy UI querying
+✔ real-time dashboards
+
+
+---
+
+💡 In real banking systems, many teams use BOTH:
+
+CLO_HEDGE_ALLOCATIONS = ledger
+CLO_HEDGE.utilized_amt = cached balance
+
+Ledger ensures correctness, cache ensures speed.
+
+
+---
+
+If you'd like, I can also show you the final enterprise-grade version banks use where:
+
+cycle exposure
+
+hedge pool
+
+loan exposure
+
+program allocation
+
+
+are calculated in one master risk view, which simplifies the entire system drastically.
+
+
+
 
