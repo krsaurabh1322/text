@@ -453,3 +453,267 @@ This model satisfies your clarified rules:
 If you want, I can also show one very important improvement used in trading allocation engines:
 
 A single “Cycle Exposure View” that replaces 6+ allocation queries with one query, making the React UI much simpler and faster.
+
+
+
+========================
+
+
+Good question. This is the key design piece that ensures the application does not change queries depending on freeze. The switching should happen in the database abstraction, not in application code.
+
+Your requirement:
+
+Before freeze → hedges participating in cycle are derived from CLO_HEDGE
+After freeze  → hedges participating in cycle are taken from CLO_CYCLE_HEDGE_POOL
+
+But the application should always run the same query.
+
+The clean way is to create a single view that switches internally.
+
+
+---
+
+1. Table Recap
+
+Hedge supply
+
+CLO_HEDGE
+hedge_id
+loan_id
+reqd_hedge_amt
+status
+created_cycle_id
+
+Freeze snapshot
+
+CLO_CYCLE_HEDGE_POOL
+pool_id
+cycle_id
+hedge_id
+frozen_supply_amt
+
+Cycle
+
+CLO_REPLENISHMENT_CYCLE
+cycle_id
+cycle_status
+freeze_date
+
+
+---
+
+2. Logic for Participating Hedges
+
+Before freeze
+
+Participating hedges = all open hedges
+
+SELECT
+hedge_id,
+reqd_hedge_amt
+FROM CLO_HEDGE
+WHERE status='OPEN';
+
+
+---
+
+After freeze
+
+Participating hedges = snapshot pool
+
+SELECT
+hedge_id,
+frozen_supply_amt
+FROM CLO_CYCLE_HEDGE_POOL
+WHERE cycle_id=:cycle_id;
+
+
+---
+
+3. Hide This Logic Using a View
+
+Create a cycle hedge supply view.
+
+CREATE VIEW VW_CYCLE_HEDGE_SUPPLY AS
+
+/* BEFORE FREEZE */
+
+SELECT
+c.cycle_id,
+h.hedge_id,
+h.reqd_hedge_amt AS supply_amt
+
+FROM CLO_REPLENISHMENT_CYCLE c
+JOIN CLO_HEDGE h
+ON 1=1
+
+WHERE c.cycle_status <> 'FROZEN'
+
+
+UNION ALL
+
+
+/* AFTER FREEZE */
+
+SELECT
+p.cycle_id,
+p.hedge_id,
+p.frozen_supply_amt
+
+FROM CLO_CYCLE_HEDGE_POOL p
+JOIN CLO_REPLENISHMENT_CYCLE c
+ON p.cycle_id = c.cycle_id
+
+WHERE c.cycle_status = 'FROZEN';
+
+Now the application never switches queries.
+
+
+---
+
+4. Query for Hedges Participating in Cycle
+
+Application query:
+
+SELECT
+hedge_id,
+supply_amt
+
+FROM VW_CYCLE_HEDGE_SUPPLY
+
+WHERE cycle_id = :cycle_id;
+
+This automatically returns:
+
+Before freeze
+
+from CLO_HEDGE
+
+After freeze
+
+from CLO_CYCLE_HEDGE_POOL
+
+
+---
+
+5. Query for Remaining Hedge in Cycle
+
+Remaining supply:
+
+SELECT
+s.hedge_id,
+s.supply_amt -
+COALESCE(SUM(a.amount),0) AS remaining
+
+FROM VW_CYCLE_HEDGE_SUPPLY s
+
+LEFT JOIN CLO_HEDGE_ALLOCATIONS a
+ON s.hedge_id = a.hedge_id
+AND a.created_cycle_id = s.cycle_id
+
+WHERE s.cycle_id = :cycle_id
+
+GROUP BY
+s.hedge_id,
+s.supply_amt;
+
+
+---
+
+6. Freeze Operation
+
+Freeze copies supply into pool.
+
+INSERT INTO CLO_CYCLE_HEDGE_POOL
+(cycle_id, hedge_id, frozen_supply_amt)
+
+SELECT
+:CYCLE_ID,
+hedge_id,
+reqd_hedge_amt
+
+FROM CLO_HEDGE
+WHERE status='OPEN';
+
+After this:
+
+cycle_status = 'FROZEN'
+
+The view automatically switches.
+
+
+---
+
+7. Timeline
+
+Before freeze
+
+CLO_HEDGE
+H1 = 10
+H2 = 5
+
+View returns:
+
+H1 10
+H2 5
+
+
+---
+
+Freeze
+
+Snapshot created:
+
+CLO_CYCLE_HEDGE_POOL
+H1 10
+H2 5
+
+Cycle status becomes:
+
+FROZEN
+
+
+---
+
+After freeze
+
+Even if new hedge created:
+
+H3 = 7
+
+View still returns:
+
+H1 10
+H2 5
+
+because pool is now the source.
+
+
+---
+
+8. Why This Design Is Good
+
+Benefits:
+
+✔ application uses single query
+✔ freeze logic fully hidden
+✔ pool snapshot preserves cycle integrity
+✔ new hedges don't disturb frozen cycle
+✔ allocations still allowed
+
+
+---
+
+9. One Important Improvement (Recommended)
+
+Right now the view uses:
+
+JOIN CLO_HEDGE h ON 1=1
+
+In production systems we usually restrict to:
+
+h.created_cycle_id <= cycle_id
+
+Otherwise future hedges might appear in earlier cycles before freeze.
+
+If you'd like, I can show the final production-grade query that banks use for cycle hedge participation, which avoids 3 subtle edge cases that appear in multi-cycle CLO systems.
