@@ -1,0 +1,455 @@
+Below is the corrected complete SQL design based on your clarified rules:
+
+Key rules we are implementing:
+
+1. Hedge supply = reqd_hedge_amt
+2. Freeze snapshots hedge supply (NOT remaining)
+3. Allocations can still change after freeze
+4. Ledger remains the source of truth for allocations
+5. Pool table only freezes supply available to the cycle
+6. Application reads allocations only from ledger
+
+So the architecture becomes:
+
+HEDGE SUPPLY
+   ↓
+CLO_HEDGE
+   ↓ (freeze snapshot)
+CLO_CYCLE_HEDGE_POOL
+   ↓
+ALLOCATIONS LEDGER
+CLO_HEDGE_ALLOCATIONS
+
+
+---
+
+1. LOAN TABLE
+
+CREATE TABLE CLO_LOAN (
+
+    loan_id VARCHAR(50) PRIMARY KEY,
+
+    loan_amount DECIMAL(18,2),
+
+    loan_status VARCHAR(20) DEFAULT 'ACTIVE',
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+---
+
+2. PROGRAM TABLE
+
+CREATE TABLE CLO_PROGRAM (
+
+    program_id VARCHAR(50) PRIMARY KEY,
+
+    program_name VARCHAR(100),
+
+    program_capacity DECIMAL(18,2),
+
+    active_flag BOOLEAN DEFAULT TRUE
+);
+
+
+---
+
+3. REPLENISHMENT CYCLE
+
+CREATE TABLE CLO_REPLENISHMENT_CYCLE (
+
+    cycle_id VARCHAR(50) PRIMARY KEY,
+
+    cycle_start_date DATE,
+
+    stop_request_date DATE,
+
+    freeze_date DATE,
+
+    closure_date DATE,
+
+    cycle_status VARCHAR(20)
+);
+
+Example statuses:
+
+OPEN
+STOPPED
+FROZEN
+CLOSED
+
+
+---
+
+4. HEDGE REQUEST TABLE (SUPPLY)
+
+This table represents hedge supply requests.
+
+CREATE TABLE CLO_HEDGE (
+
+    hedge_id VARCHAR(50) PRIMARY KEY,
+
+    loan_id VARCHAR(50) NOT NULL,
+
+    req_type VARCHAR(20),
+
+    extension_type VARCHAR(30),
+
+    reqd_hedge_amt DECIMAL(18,2),
+
+    hedge_deadline_date DATE,
+
+    status VARCHAR(20) DEFAULT 'OPEN',
+
+    created_cycle_id VARCHAR(50),
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (loan_id)
+        REFERENCES CLO_LOAN(loan_id),
+
+    FOREIGN KEY (created_cycle_id)
+        REFERENCES CLO_REPLENISHMENT_CYCLE(cycle_id)
+);
+
+Important rule:
+
+reqd_hedge_amt = hedge supply
+
+
+---
+
+5. HEDGE ALLOCATION LEDGER
+
+Ledger tracks all allocation movements.
+
+CREATE TABLE CLO_HEDGE_ALLOCATIONS (
+
+    allocation_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    hedge_id VARCHAR(50) NOT NULL,
+
+    program_id VARCHAR(50) NOT NULL,
+
+    amount DECIMAL(18,2),
+
+    txn_type VARCHAR(20),
+
+    created_cycle_id VARCHAR(50),
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (hedge_id)
+        REFERENCES CLO_HEDGE(hedge_id),
+
+    FOREIGN KEY (program_id)
+        REFERENCES CLO_PROGRAM(program_id),
+
+    FOREIGN KEY (created_cycle_id)
+        REFERENCES CLO_REPLENISHMENT_CYCLE(cycle_id)
+);
+
+Transaction types:
+
+ALLOCATE = +amount
+REDUCE   = -amount
+DROP     = -amount
+REALLOCATE = +/- amount
+
+
+---
+
+6. CYCLE HEDGE POOL (FREEZE SNAPSHOT)
+
+This captures hedge supply at freeze time.
+
+CREATE TABLE CLO_CYCLE_HEDGE_POOL (
+
+    pool_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    cycle_id VARCHAR(50) NOT NULL,
+
+    hedge_id VARCHAR(50) NOT NULL,
+
+    frozen_supply_amt DECIMAL(18,2),
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (cycle_id)
+        REFERENCES CLO_REPLENISHMENT_CYCLE(cycle_id),
+
+    FOREIGN KEY (hedge_id)
+        REFERENCES CLO_HEDGE(hedge_id)
+);
+
+Important rule:
+
+frozen_supply_amt = reqd_hedge_amt at freeze
+
+Pool never updates after freeze.
+
+
+---
+
+7. INDEXES (PERFORMANCE)
+
+CREATE INDEX IDX_HEDGE_LOAN
+ON CLO_HEDGE(loan_id);
+
+CREATE INDEX IDX_HEDGE_STATUS
+ON CLO_HEDGE(status);
+
+CREATE INDEX IDX_ALLOC_HEDGE
+ON CLO_HEDGE_ALLOCATIONS(hedge_id);
+
+CREATE INDEX IDX_ALLOC_CYCLE
+ON CLO_HEDGE_ALLOCATIONS(created_cycle_id);
+
+CREATE INDEX IDX_POOL_CYCLE
+ON CLO_CYCLE_HEDGE_POOL(cycle_id);
+
+
+---
+
+8. FREEZE PROCESS
+
+Executed when cycle reaches freeze date.
+
+INSERT INTO CLO_CYCLE_HEDGE_POOL
+(cycle_id, hedge_id, frozen_supply_amt)
+
+SELECT
+:CYCLE_ID,
+hedge_id,
+reqd_hedge_amt
+FROM CLO_HEDGE
+WHERE status='OPEN';
+
+Example snapshot:
+
+cycle	hedge	supply
+
+C1	H1	10
+C1	H2	5
+
+
+
+---
+
+9. ALLOCATION FLOW
+
+User allocates hedge.
+
+Example:
+
+Program P1 gets 6 from H1
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id, program_id, amount, txn_type, created_cycle_id)
+
+VALUES
+('H1','P1',6,'ALLOCATE','C1');
+
+
+---
+
+10. REDUCTION FLOW
+
+Program releases hedge.
+
+P1 releases 2
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(hedge_id, program_id, amount, txn_type, created_cycle_id)
+
+VALUES
+('H1','P1',-2,'REDUCE','C1');
+
+
+---
+
+11. REALLOCATION FLOW
+
+Reallocate hedge between programs.
+
+Step 1 reduce from P1
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+VALUES
+(DEFAULT,'H1','P1',-3,'REALLOCATE','C1',CURRENT_TIMESTAMP);
+
+Step 2 allocate to P2
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+VALUES
+(DEFAULT,'H1','P2',3,'REALLOCATE','C1',CURRENT_TIMESTAMP);
+
+
+---
+
+12. QUERY — TOTAL ALLOCATION FOR PROGRAM IN CYCLE
+
+Always from ledger.
+
+SELECT
+program_id,
+SUM(amount) AS total_allocated
+
+FROM CLO_HEDGE_ALLOCATIONS
+
+WHERE created_cycle_id = :cycle_id
+AND program_id = :program_id
+
+GROUP BY program_id;
+
+
+---
+
+13. QUERY — TOTAL ALLOCATION PER HEDGE
+
+SELECT
+hedge_id,
+SUM(amount) allocated
+
+FROM CLO_HEDGE_ALLOCATIONS
+
+WHERE created_cycle_id = :cycle_id
+
+GROUP BY hedge_id;
+
+
+---
+
+14. QUERY — REMAINING HEDGE IN CYCLE
+
+Remaining capacity per hedge.
+
+SELECT
+p.hedge_id,
+p.frozen_supply_amt -
+COALESCE(SUM(a.amount),0) AS remaining_amt
+
+FROM CLO_CYCLE_HEDGE_POOL p
+
+LEFT JOIN CLO_HEDGE_ALLOCATIONS a
+ON p.hedge_id = a.hedge_id
+AND a.created_cycle_id = p.cycle_id
+
+WHERE p.cycle_id = :cycle_id
+
+GROUP BY p.hedge_id,p.frozen_supply_amt;
+
+
+---
+
+15. QUERY — AVAILABLE HEDGES FOR ALLOCATION SCREEN
+
+SELECT
+p.hedge_id,
+p.frozen_supply_amt -
+COALESCE(SUM(a.amount),0) AS remaining_amt
+
+FROM CLO_CYCLE_HEDGE_POOL p
+
+LEFT JOIN CLO_HEDGE_ALLOCATIONS a
+ON p.hedge_id = a.hedge_id
+AND a.created_cycle_id = p.cycle_id
+
+WHERE p.cycle_id = :cycle_id
+
+GROUP BY p.hedge_id,p.frozen_supply_amt
+
+HAVING p.frozen_supply_amt -
+COALESCE(SUM(a.amount),0) > 0;
+
+
+---
+
+16. QUERY — PROGRAM ALLOCATION REPORT
+
+SELECT
+program_id,
+SUM(amount) total_allocated
+
+FROM CLO_HEDGE_ALLOCATIONS
+
+WHERE created_cycle_id = :cycle_id
+
+GROUP BY program_id;
+
+
+---
+
+17. QUERY — LOAN LEVEL HEDGE USAGE
+
+SELECT
+h.loan_id,
+SUM(a.amount) allocated
+
+FROM CLO_HEDGE_ALLOCATIONS a
+JOIN CLO_HEDGE h
+ON a.hedge_id = h.hedge_id
+
+WHERE a.created_cycle_id = :cycle_id
+
+GROUP BY h.loan_id;
+
+
+---
+
+18. FULL FLOW EXAMPLE
+
+Loan:
+
+L1
+
+Hedges:
+
+H1 = 10
+H2 = 5
+
+Freeze snapshot:
+
+hedge	supply
+
+H1	10
+H2	5
+
+
+
+---
+
+Allocations:
+
+program	hedge	amount
+
+P1	H1	6
+P2	H1	2
+P3	H2	3
+
+
+Remaining:
+
+H1 → 10 - 8 = 2
+H2 → 5 - 3 = 2
+
+
+---
+
+19. Why This Design Is Correct
+
+This model satisfies your clarified rules:
+
+✔ freeze captures supply
+✔ allocations remain flexible
+✔ ledger is always the source of truth
+✔ application queries remain consistent
+✔ reallocation after freeze is supported
+
+
+---
+
+If you want, I can also show one very important improvement used in trading allocation engines:
+
+A single “Cycle Exposure View” that replaces 6+ allocation queries with one query, making the React UI much simpler and faster.
