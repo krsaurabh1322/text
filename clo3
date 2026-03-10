@@ -485,3 +485,327 @@ This is very similar to designs used in large trading allocation engines.
 “Cycle Views Layer”
 
 Where ALL operational queries become just 3 views, which dramatically simplifies the Spring Boot service + React UI.
+
+
+
+
+==========
+
+
+
+Great 👍 Since your schema already includes CRE_BY, CRE_DATE, UPD_BY, UPD_DATE, I’ll include them in the sample data inserts so you can directly run tests.
+
+I'll provide consistent sample data across all tables so that:
+
+Loans → Hedges → Pool → Allocations → Rules all connect correctly
+
+You can test freeze logic
+
+You can test rule evaluation
+
+You can test remaining hedge calculations
+
+
+I’ll assume:
+
+Cycle : CYCLE_2025_01
+Programs : P1, P2, P3
+Loans : L1, L2, L3
+Hedges : H1, H2, H3
+
+
+---
+
+1️⃣ PROGRAM TABLE
+
+INSERT INTO LH_CLO_PROGRAM
+(PROGRAM_ID, PROGRAM_NAME, IPNA, ACTIVE_FLAG, CRE_BY, CRE_DATE)
+VALUES
+('P1','CLO Program Alpha', 100000000,1,'SYSTEM',CURRENT_TIMESTAMP);
+
+INSERT INTO LH_CLO_PROGRAM
+(PROGRAM_ID, PROGRAM_NAME, IPNA, ACTIVE_FLAG, CRE_BY, CRE_DATE)
+VALUES
+('P2','CLO Program Beta', 80000000,1,'SYSTEM',CURRENT_TIMESTAMP);
+
+INSERT INTO LH_CLO_PROGRAM
+(PROGRAM_ID, PROGRAM_NAME, IPNA, ACTIVE_FLAG, CRE_BY, CRE_DATE)
+VALUES
+('P3','CLO Program Gamma', 60000000,1,'SYSTEM',CURRENT_TIMESTAMP);
+
+
+---
+
+2️⃣ REPLENISHMENT CYCLE
+
+INSERT INTO LH_CLO_REPLENISHMENT_CYCLE
+(
+CYCLE_ID,
+CYCLE_START_DATE,
+CYCLE_END_DATE,
+REQUEST_STOP_DATE,
+FREEZE_STATIC_UPDATE_DATE,
+CYCLE_STATUS,
+CRE_BY,
+CRE_DATE
+)
+VALUES
+(
+'CYCLE_2025_01',
+DATE '2025-01-01',
+DATE '2025-03-31',
+DATE '2025-02-01',
+DATE '2025-02-28',
+'OPEN',
+'SYSTEM',
+CURRENT_TIMESTAMP
+);
+
+
+---
+
+3️⃣ LOAN INVENTORY
+
+INSERT INTO LH_CLO_LOAN_INVENTORY
+(loan_id, rating, industry, country, spread, maturity_date)
+VALUES
+('L1','BBB','Technology','USA',2.5, DATE '2030-06-30');
+
+INSERT INTO LH_CLO_LOAN_INVENTORY
+VALUES
+('L2','BB+','Healthcare','USA',3.0, DATE '2031-12-31');
+
+INSERT INTO LH_CLO_LOAN_INVENTORY
+VALUES
+('L3','BB','Energy','Canada',4.1, DATE '2029-03-31');
+
+
+---
+
+4️⃣ HEDGE REQUEST TABLE
+
+INSERT INTO LH_CLO_HEDGE
+(
+hedge_id,
+loan_id,
+req_type,
+extension_type,
+reqd_hedge_amt,
+hedge_deadline_date,
+status,
+created_cycle_id,
+CRE_BY,
+CRE_DATE
+)
+VALUES
+(
+'H1',
+'L1',
+'NEW',
+NULL,
+10000000,
+DATE '2025-02-15',
+'OPEN',
+'CYCLE_2025_01',
+'SYSTEM',
+CURRENT_TIMESTAMP
+);
+
+INSERT INTO LH_CLO_HEDGE
+VALUES
+(
+'H2',
+'L2',
+'NEW',
+NULL,
+5000000,
+DATE '2025-02-20',
+'OPEN',
+'CYCLE_2025_01',
+NULL,
+NULL,
+'SYSTEM',
+CURRENT_TIMESTAMP
+);
+
+INSERT INTO LH_CLO_HEDGE
+VALUES
+(
+'H3',
+'L3',
+'EXTENSION',
+'INCREASE',
+7000000,
+DATE '2025-02-25',
+'OPEN',
+'CYCLE_2025_01',
+NULL,
+NULL,
+'SYSTEM',
+CURRENT_TIMESTAMP
+);
+
+
+---
+
+5️⃣ CYCLE HEDGE POOL (Freeze Snapshot)
+
+Simulating freeze event.
+
+INSERT INTO LH_CLO_CYCLE_HEDGE_POOL
+(cycle_id, hedge_id, frozen_supply_amt, CRE_BY, CRE_DATE)
+VALUES
+('CYCLE_2025_01','H1',10000000,'SYSTEM',CURRENT_TIMESTAMP);
+
+INSERT INTO LH_CLO_CYCLE_HEDGE_POOL
+VALUES
+(DEFAULT,'CYCLE_2025_01','H2',5000000,NULL,NULL,'SYSTEM',CURRENT_TIMESTAMP);
+
+INSERT INTO LH_CLO_CYCLE_HEDGE_POOL
+VALUES
+(DEFAULT,'CYCLE_2025_01','H3',7000000,NULL,NULL,'SYSTEM',CURRENT_TIMESTAMP);
+
+
+---
+
+6️⃣ HEDGE ALLOCATION LEDGER
+
+Allocations to programs.
+
+Initial allocations
+
+INSERT INTO LH_CLO_HEDGE_ALLOCATIONS
+(hedge_id, program_id, amount, txn_type, created_cycle_id, CRE_BY, CRE_DATE)
+VALUES
+('H1','P1',6000000,'ALLOCATE','CYCLE_2025_01','TRADER1',CURRENT_TIMESTAMP);
+
+INSERT INTO LH_CLO_HEDGE_ALLOCATIONS
+VALUES
+(DEFAULT,'H1','P2',2000000,'ALLOCATE','CYCLE_2025_01',NULL,NULL,'TRADER1',CURRENT_TIMESTAMP);
+
+INSERT INTO LH_CLO_HEDGE_ALLOCATIONS
+VALUES
+(DEFAULT,'H2','P3',3000000,'ALLOCATE','CYCLE_2025_01',NULL,NULL,'TRADER2',CURRENT_TIMESTAMP);
+
+
+---
+
+Reallocation example
+
+INSERT INTO LH_CLO_HEDGE_ALLOCATIONS
+VALUES
+(DEFAULT,'H1','P1',-1000000,'REALLOCATE','CYCLE_2025_01',NULL,NULL,'TRADER1',CURRENT_TIMESTAMP);
+
+INSERT INTO LH_CLO_HEDGE_ALLOCATIONS
+VALUES
+(DEFAULT,'H1','P3',1000000,'REALLOCATE','CYCLE_2025_01',NULL,NULL,'TRADER1',CURRENT_TIMESTAMP);
+
+
+---
+
+7️⃣ LOAN STATIC SNAPSHOT (Month-End Freeze)
+
+INSERT INTO LH_CLO_LOAN_STATIC_SNAPSHOT
+(
+cycle_id,
+loan_id,
+rating,
+industry,
+country,
+spread,
+maturity_date,
+snapshot_date
+)
+VALUES
+(
+'CYCLE_2025_01',
+'L1',
+'BBB',
+'Technology',
+'USA',
+2.5,
+DATE '2030-06-30',
+DATE '2025-02-28'
+);
+
+INSERT INTO LH_CLO_LOAN_STATIC_SNAPSHOT
+VALUES
+(DEFAULT,'CYCLE_2025_01','L2','BB+','Healthcare','USA',3.0,DATE '2031-12-31',DATE '2025-02-28');
+
+INSERT INTO LH_CLO_LOAN_STATIC_SNAPSHOT
+VALUES
+(DEFAULT,'CYCLE_2025_01','L3','BB','Energy','Canada',4.1,DATE '2029-03-31',DATE '2025-02-28');
+
+
+---
+
+8️⃣ Expected Allocation Results
+
+From the inserted ledger.
+
+Total allocation per program
+
+Program	Allocation
+
+P1	5M
+P2	2M
+P3	4M
+
+
+
+---
+
+Remaining hedge supply
+
+Hedge	Supply	Used	Remaining
+
+H1	10M	8M	2M
+H2	5M	3M	2M
+H3	7M	0	7M
+
+
+
+---
+
+9️⃣ Sample Rule Test
+
+Rule:
+
+Loan rating must be ≥ BB+
+
+Violating loan:
+
+L3 = BB
+
+So rule query should detect:
+
+H3 allocations (if any)
+
+
+---
+
+🔟 Recommended Test Order
+
+Run tests in this order:
+
+1️⃣ insert programs
+2️⃣ insert cycle
+3️⃣ insert loan inventory
+4️⃣ insert hedges
+5️⃣ freeze → populate cycle hedge pool
+6️⃣ insert allocations
+7️⃣ snapshot loan attributes
+
+
+---
+
+✅ If you want, I can also give you a single SQL script (~250 lines) that:
+
+creates all tables
+
+inserts sample data
+
+runs verification queries
+
+
+so you can run everything in one shot in Oracle/SQL Developer.
