@@ -1,0 +1,509 @@
+Your new thinking is much closer to a clean enterprise architecture 👍. What you are doing is essentially moving from a batch-pull architecture to a source-of-truth + event-driven architecture, which is exactly what systems using Camunda orchestration + rule engines usually evolve toward.
+
+I'll rewrite the design + data flow incorporating the points you just mentioned so everything becomes consistent.
+
+
+---
+
+1. Key Architecture Changes You Proposed
+
+1️⃣ Loan inventory is now direct DB access
+
+Old design:
+
+CLO → Loan Inventory API → staging table
+
+New design:
+
+CLO → read directly from inventory tables
+
+Tables already exist:
+
+loan_inventory_daily
+loan_inventory_monthly
+
+Therefore:
+
+❌ No staging table required
+❌ No daily API refresh job
+
+This simplifies the architecture significantly.
+
+
+---
+
+2. Inventory Data Switching Requirement
+
+You said:
+
+> After freeze_static_update_date we must show monthly inventory until cycle closes.
+
+
+
+Before freeze:
+
+loan_inventory_daily
+
+After freeze:
+
+loan_inventory_monthly
+
+This is perfect for a single abstraction view.
+
+
+---
+
+3. Inventory View Abstraction
+
+Create a single view used by:
+
+UI
+
+Camunda rule engine
+
+allocation validation
+
+
+CLO_LOAN_INVENTORY_VIEW
+
+Example:
+
+CREATE OR REPLACE VIEW CLO_LOAN_INVENTORY_VIEW AS
+SELECT *
+FROM LOAN_INVENTORY_DAILY;
+
+When freeze happens:
+
+CREATE OR REPLACE VIEW CLO_LOAN_INVENTORY_VIEW AS
+SELECT *
+FROM LOAN_INVENTORY_MONTHLY
+WHERE SNAPSHOT_DATE =
+(
+SELECT FREEZE_STATIC_UPDATE_DATE
+FROM CLO_REPLENISHMENT_CYCLE
+WHERE CYCLE_STATUS != 'CLOSED'
+);
+
+Now:
+
+UI
+Camunda rules
+Allocation queries
+
+all use the same view.
+
+No code changes.
+
+
+---
+
+4. Hedge Supply Source
+
+You clarified something very important:
+
+There is an external hedge system.
+
+HEDGE_APP.HEDGE_REQUEST
+
+CLO has its own table:
+
+CLO_HEDGE
+
+Because CLO adds additional attributes.
+
+So we must copy data into CLO_HEDGE.
+
+But instead of batch pulling, we use events + Camunda.
+
+
+---
+
+5. New Event Driven Flow
+
+Ticket created in Hedge system
+
+HEDGE_APP
+    │
+    │  Event
+    ▼
+Solace
+    │
+    ▼
+Camunda workflow
+    │
+    ▼
+CLO API
+    │
+    ▼
+UPSERT into CLO_HEDGE
+
+No polling required.
+
+
+---
+
+6. CLO_HEDGE Structure
+
+CLO_HEDGE now contains:
+
+external hedge attributes
++
+CLO attributes
+
+Example:
+
+hedge_id
+loan_id
+req_type
+reqd_hedge_amt
+deadline_date
+
+created_cycle_id
+allocation_status
+freeze_flag
+
+
+---
+
+7. Data Flow (Updated)
+
+7.1 System Components
+
+Loan Inventory DB
+Hedge System
+Solace Event Bus
+Camunda Workflow
+CLO Service
+Camunda Rule Engine
+CLO Database
+UI
+
+
+---
+
+7.2 Daily System Behaviour
+
+Step 1 — Inventory
+
+CLO reads:
+
+loan_inventory_daily
+
+through
+
+CLO_LOAN_INVENTORY_VIEW
+
+
+---
+
+Step 2 — Hedge Requests
+
+New hedge created in hedge system.
+
+User → Hedge App
+
+Event emitted.
+
+Solace event
+
+
+---
+
+Step 3 — Camunda Workflow
+
+Camunda receives event.
+
+Camunda calls:
+
+POST /clo/hedge
+
+Payload example:
+
+hedge_id
+loan_id
+req_type
+amount
+deadline
+
+
+---
+
+Step 4 — CLO Service
+
+CLO service:
+
+UPSERT CLO_HEDGE
+
+Example SQL:
+
+MERGE INTO CLO_HEDGE t
+USING (SELECT :hedge_id hedge_id FROM dual) s
+ON (t.hedge_id=s.hedge_id)
+WHEN MATCHED THEN
+UPDATE SET
+reqd_hedge_amt=:amount
+WHEN NOT MATCHED THEN
+INSERT
+(
+hedge_id,
+loan_id,
+req_type,
+reqd_hedge_amt,
+created_cycle_id
+)
+VALUES
+(
+:hedge_id,
+:loan_id,
+:req_type,
+:amount,
+:cycle_id
+);
+
+
+---
+
+8. Hedge Allocation Flow
+
+Allocation is still ledger.
+
+CLO_HEDGE_ALLOCATIONS
+
+Insert only.
+
+Example:
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(
+hedge_id,
+program_id,
+amount,
+txn_type,
+created_cycle_id
+)
+VALUES
+(
+'H1',
+'P1',
+5000000,
+'ALLOCATE',
+'CYCLE_2025_01'
+);
+
+
+---
+
+9. Freeze Process (Camunda Trigger)
+
+Instead of cron job:
+
+Camunda triggers freeze.
+
+26th
+|
+Stop hedge supply
+|
+Freeze supply snapshot
+|
+Switch inventory view
+
+
+---
+
+Step 1 — Stop Supply
+
+Camunda updates cycle:
+
+UPDATE CLO_REPLENISHMENT_CYCLE
+SET CYCLE_STATUS='REQUEST_STOPPED'
+WHERE cycle_id=:cycle_id;
+
+CLO API rejects new hedges.
+
+
+---
+
+Step 2 — Freeze Hedge Pool
+
+INSERT INTO CLO_CYCLE_HEDGE_POOL
+(
+cycle_id,
+hedge_id,
+frozen_supply_amt
+)
+SELECT
+:cycle_id,
+hedge_id,
+reqd_hedge_amt
+FROM CLO_HEDGE
+WHERE created_cycle_id=:cycle_id;
+
+
+---
+
+Step 3 — Freeze Loan Inventory
+
+Camunda switches view.
+
+CLO_LOAN_INVENTORY_VIEW
+→ monthly
+
+
+---
+
+10. Allocation Queries
+
+Allocation per program
+
+SELECT
+program_id,
+SUM(amount) allocation
+FROM CLO_HEDGE_ALLOCATIONS
+GROUP BY program_id;
+
+
+---
+
+Hedge utilization
+
+SELECT
+p.hedge_id,
+p.frozen_supply_amt,
+NVL(SUM(a.amount),0) used_amt,
+p.frozen_supply_amt - NVL(SUM(a.amount),0) remaining
+FROM CLO_CYCLE_HEDGE_POOL p
+LEFT JOIN CLO_HEDGE_ALLOCATIONS a
+ON p.hedge_id=a.hedge_id
+GROUP BY
+p.hedge_id,
+p.frozen_supply_amt;
+
+
+---
+
+11. Camunda Rule Engine
+
+Rules load loan attributes from:
+
+CLO_LOAN_INVENTORY_VIEW
+
+Example rule query:
+
+SELECT
+loan_id,
+rating,
+industry
+FROM CLO_LOAN_INVENTORY_VIEW
+WHERE rating < 'BB';
+
+Camunda evaluates rule violations.
+
+
+---
+
+12. Cycle Closure
+
+Camunda closes cycle.
+
+CYCLE_STATUS = CLOSED
+
+Inventory view returns to:
+
+loan_inventory_daily
+
+New cycle begins.
+
+
+---
+
+13. Final Architecture
+
++----------------+
+                 | Loan Inventory |
+                 | Daily/Monthly  |
+                 +--------+-------+
+                          |
+                          | View
+                          v
+                CLO_LOAN_INVENTORY_VIEW
+                          |
+                          |
++-------------+           v
+| Hedge App   |      +-----------+
++------+------+      | Camunda   |
+       |             | Workflow  |
+       | Solace      +-----+-----+
+       v                   |
++-------------+            |
+| Event Bus   |            v
++-------------+      +-----------+
+                     | CLO API   |
+                     +-----+-----+
+                           |
+                           v
+                    +-------------+
+                    | CLO_HEDGE   |
+                    +-------------+
+                           |
+                           v
+                 +----------------------+
+                 | CLO_HEDGE_ALLOCATIONS|
+                 +----------------------+
+                           |
+                           v
+                          UI
+
+
+---
+
+14. Benefits of This Design
+
+Simpler
+
+Removed staging tables.
+
+
+---
+
+Real Time
+
+Hedge requests propagate instantly.
+
+
+---
+
+Cleaner Ownership
+
+Loan inventory → Loan system
+Hedge requests → Hedge system
+Allocation → CLO system
+
+
+---
+
+Camunda Controlled Lifecycle
+
+Camunda orchestrates:
+
+hedge ingest
+stop supply
+freeze
+cycle close
+
+
+---
+
+Camunda Rule Engine Compatible
+
+Rules use a single inventory view.
+
+
+---
+
+✅ If you want, I can also show a very powerful improvement that banks use with Camunda + allocation engines:
+
+"Reservation Locking Pattern"
+
+Without it, two users allocating hedge at the same time can over-allocate supply.
+
+It's a very common production failure scenario, and the fix is surprisingly simple.
