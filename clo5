@@ -1,0 +1,445 @@
+Below is a revised technical write-up incorporating the additional flow you showed in the screenshot (daily Camunda flow, direct DB reads, porting service loads, and upsert logic). I’ve structured it as a solution design section for the CLO Chakra program, focusing specifically on data model and data flow.
+
+
+---
+
+CLO Chakra Program
+
+Hedge Allocation – Data Flow and Data Model Design
+
+1. Overview
+
+The CLO Chakra Program manages hedge supply requests for loans and allocates them to CLO programs within a replenishment cycle.
+
+The system integrates with the following upstream systems:
+
+Loan Inventory System – provides loan attributes
+
+Hedge Request System – provides hedge supply requests
+
+Porting Service – loads inventory datasets
+
+Camunda Workflow Engine – orchestrates data refresh and lifecycle events
+
+Camunda Rule Engine – evaluates allocation rules
+
+
+The CLO system maintains its own hedge dataset and allocation ledger, while loan inventory remains owned by the Loan Inventory system.
+
+
+---
+
+2. System Components
+
+The following data sources and services participate in the flow.
+
+Component	Responsibility
+
+Porting Service	loads loan inventory datasets
+Loan Inventory DB	stores daily and monthly inventory tables
+Hedge Application DB	stores hedge requests
+Camunda Workflow	orchestrates periodic data synchronization
+CLO Service	processes hedge requests and performs allocations
+CLO Database	stores hedge requests and allocation ledger
+Camunda Rule Engine	runs rule validations
+
+
+
+---
+
+3. Loan Inventory Data Model
+
+The Loan Inventory system exposes two datasets.
+
+Table	Purpose
+
+LOAN_INVENTORY_DAILY	current loan attributes
+LOAN_INVENTORY_MONTHLY	frozen monthly snapshot
+
+
+Inventory Data Load
+
+The Porting Service loads these tables:
+
+Daily load:
+
+truncate + load
+loan_inventory_daily
+
+Monthly load:
+
+truncate + load
+loan_inventory_monthly
+
+These datasets remain the source of truth for loan attributes.
+
+The CLO system does not duplicate these attributes.
+
+
+---
+
+4. CLO Loan Inventory Access
+
+The CLO system accesses inventory through a view abstraction.
+
+CLO_LOAN_INVENTORY_VIEW
+
+This view dynamically references the appropriate dataset depending on cycle phase.
+
+Before Static Freeze
+
+loan_inventory_daily
+
+After Static Freeze
+
+loan_inventory_monthly
+
+This ensures:
+
+UI displays correct inventory
+
+Camunda rule engine evaluates frozen data
+
+no application logic change is required
+
+
+
+---
+
+5. Hedge Request Source
+
+Hedge supply requests originate in the Hedge Application database.
+
+Example table:
+
+HEDGE_REQUEST
+
+The CLO system maintains its own hedge table:
+
+CLO_HEDGE
+
+This table contains:
+
+hedge attributes from the source system
+
+CLO-specific attributes used during allocation
+
+
+
+---
+
+6. Daily Camunda Synchronization Flow
+
+Camunda orchestrates a daily synchronization workflow.
+
+This flow ingests new hedge requests and enriches them with loan attributes.
+
+Step 1 – Camunda Trigger
+
+Camunda invokes a daily synchronization process within CLO.
+
+Purpose:
+
+load latest inventory
+
+fetch new hedge requests
+
+update CLO hedge dataset
+
+
+
+---
+
+Step 2 – Read Loan Inventory
+
+CLO reads the latest inventory from:
+
+loan_inventory_daily
+
+This provides current loan attributes.
+
+
+---
+
+Step 3 – Identify New Hedge Requests
+
+CLO queries the Hedge system for new requests.
+
+Condition:
+
+created_date > latest created_date in clo_hedge
+
+Only new hedge requests are fetched.
+
+Example logic:
+
+SELECT *
+FROM hedge_request
+WHERE created_date >
+(
+SELECT MAX(created_date)
+FROM clo_hedge
+)
+
+
+---
+
+Step 4 – Merge Hedge and Loan Data
+
+The new hedge requests are joined with loan inventory to enrich them with loan attributes.
+
+Example merge logic:
+
+SELECT
+h.hedge_id,
+h.loan_id,
+h.req_type,
+h.reqd_hedge_amt,
+l.rating,
+l.industry,
+l.country
+FROM hedge_request h
+JOIN loan_inventory_daily l
+ON h.loan_id = l.loan_id
+WHERE h.status = 'OPEN'
+
+This produces an enriched hedge dataset.
+
+
+---
+
+Step 5 – Upsert Into CLO_HEDGE
+
+The enriched records are inserted or updated in the CLO hedge table.
+
+Example upsert logic:
+
+MERGE INTO clo_hedge t
+USING source_data s
+ON (t.hedge_id = s.hedge_id)
+
+WHEN MATCHED THEN
+UPDATE SET
+reqd_hedge_amt = s.reqd_hedge_amt,
+loan_rating = s.rating
+
+WHEN NOT MATCHED THEN
+INSERT
+(
+hedge_id,
+loan_id,
+req_type,
+reqd_hedge_amt,
+loan_rating,
+created_cycle_id
+)
+VALUES
+(
+s.hedge_id,
+s.loan_id,
+s.req_type,
+s.reqd_hedge_amt,
+s.rating,
+:cycle_id
+);
+
+This ensures that CLO_HEDGE remains synchronized with the Hedge system.
+
+
+---
+
+7. CLO Hedge Data Model
+
+The CLO_HEDGE table stores hedge requests enriched with CLO attributes.
+
+Example attributes:
+
+Column	Description
+
+hedge_id	hedge request identifier
+loan_id	underlying loan
+req_type	hedge request type
+reqd_hedge_amt	requested hedge amount
+created_cycle_id	cycle in which hedge was created
+allocation_status	allocation state
+deadline_date	hedge deadline
+
+
+Loan attributes are not permanently stored; they are referenced from inventory views when needed.
+
+
+---
+
+8. Hedge Allocation Model
+
+Hedge allocations are stored in a ledger table.
+
+CLO_HEDGE_ALLOCATIONS
+
+This table records allocation transactions.
+
+Characteristics:
+
+insert-only
+
+immutable history
+
+no update or delete operations
+
+
+Example transaction types:
+
+Type	Description
+
+ALLOCATE	new allocation
+REALLOCATE	move allocation between programs
+REDUCE	decrease allocation
+DROP	reverse allocations when loan removed
+
+
+Final allocation values are calculated using aggregation.
+
+
+---
+
+9. Hedge Supply Freeze
+
+During each replenishment cycle a freeze event occurs.
+
+The freeze process consists of three steps.
+
+Step 1 – Stop New Hedge Requests
+
+Cycle status is updated.
+
+REQUEST_STOPPED
+
+CLO rejects new hedge requests for the cycle.
+
+
+---
+
+Step 2 – Snapshot Hedge Supply
+
+Current hedge supply is captured into a pool table.
+
+CLO_CYCLE_HEDGE_POOL
+
+Example logic:
+
+INSERT INTO clo_cycle_hedge_pool
+SELECT
+cycle_id,
+hedge_id,
+reqd_hedge_amt
+FROM clo_hedge
+WHERE created_cycle_id = :cycle_id
+
+This snapshot represents the maximum hedge supply available for allocation.
+
+
+---
+
+Step 3 – Freeze Loan Inventory
+
+At the freeze point the inventory view switches from:
+
+loan_inventory_daily
+
+to
+
+loan_inventory_monthly
+
+All rule evaluations now use frozen loan attributes.
+
+
+---
+
+10. Rule Evaluation
+
+Rules are executed by the Camunda Rule Engine.
+
+Loan attributes used by rules are loaded from:
+
+CLO_LOAN_INVENTORY_VIEW
+
+Example rule query:
+
+SELECT loan_id
+FROM CLO_LOAN_INVENTORY_VIEW
+WHERE rating < 'BB'
+
+Rules determine whether a hedge allocation violates program constraints.
+
+
+---
+
+11. Cycle Closure
+
+At the end of the cycle:
+
+1. Camunda updates the cycle status to CLOSED
+
+
+2. Allocation activity stops
+
+
+3. Inventory view switches back to daily inventory
+
+
+4. A new cycle begins
+
+
+
+
+---
+
+12. Benefits of the Design
+
+Simplified Integration
+
+Loan inventory is accessed directly from the source database without staging tables.
+
+
+---
+
+Controlled Data Synchronization
+
+Camunda orchestrates the hedge ingestion workflow ensuring consistent updates.
+
+
+---
+
+Data Consistency
+
+Loan inventory views ensure rule evaluations operate on stable datasets.
+
+
+---
+
+Full Allocation Auditability
+
+The allocation ledger preserves a complete history of allocation transactions.
+
+
+---
+
+Flexible Allocation Management
+
+Allocations can be rebalanced without modifying historical records.
+
+
+---
+
+If you want, I can also help you convert this into a proper architecture review document format typically used in banks for programs like CLO Chakra, with sections such as:
+
+Assumptions
+
+Non-Functional Requirements
+
+Data Model Diagram
+
+Sequence Diagrams for Daily Sync, Allocation, and Freeze
+
+
+Those sections are usually required for architecture governance approvals.
