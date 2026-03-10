@@ -1,0 +1,487 @@
+You're now at the final stage of the design, so I'll give you a clean enterprise-style schema + query layer that solves all the problems you raised:
+
+1. No separate CLO_PROGRAM_ALLOCATION_HISTORY
+
+
+2. Insert-only allocation ledger
+
+
+3. Freeze dates respected
+
+
+4. Queries don't need to know whether to use snapshot or live loan data
+
+
+5. Rule engine queries stay simple
+
+
+
+The trick is exactly what you suggested: use a VIEW layer.
+
+
+---
+
+1️⃣ Final List of Tables
+
+1. Cycle Table
+
+Tracks lifecycle and freeze dates.
+
+CREATE TABLE CLO_REPLENISHMENT_CYCLE (
+
+    cycle_id VARCHAR(50) PRIMARY KEY,
+
+    cycle_name VARCHAR(100),
+
+    request_stop_date DATE,
+
+    freeze_static_update_date DATE,
+
+    closure_date DATE,
+
+    cycle_status VARCHAR(20),
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+---
+
+2️⃣ Loan Master
+
+CREATE TABLE CLO_LOAN (
+
+    loan_id VARCHAR(50) PRIMARY KEY,
+
+    loan_name VARCHAR(200),
+
+    issuer VARCHAR(200),
+
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+---
+
+3️⃣ Loan Inventory (LIVE attributes)
+
+Attributes change here daily.
+
+CREATE TABLE CLO_LOAN_INVENTORY (
+
+    loan_id VARCHAR(50),
+
+    rating VARCHAR(10),
+
+    industry VARCHAR(50),
+
+    country VARCHAR(50),
+
+    spread DECIMAL(10,4),
+
+    maturity_date DATE,
+
+    last_updated TIMESTAMP,
+
+    PRIMARY KEY (loan_id),
+
+    FOREIGN KEY (loan_id)
+        REFERENCES CLO_LOAN(loan_id)
+);
+
+
+---
+
+4️⃣ Loan Static Snapshot
+
+Used after freeze date.
+
+CREATE TABLE CLO_LOAN_STATIC_SNAPSHOT (
+
+    snapshot_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    cycle_id VARCHAR(50),
+
+    loan_id VARCHAR(50),
+
+    rating VARCHAR(10),
+
+    industry VARCHAR(50),
+
+    country VARCHAR(50),
+
+    spread DECIMAL(10,4),
+
+    maturity_date DATE,
+
+    snapshot_date DATE,
+
+    FOREIGN KEY (cycle_id)
+        REFERENCES CLO_REPLENISHMENT_CYCLE(cycle_id),
+
+    FOREIGN KEY (loan_id)
+        REFERENCES CLO_LOAN(loan_id)
+);
+
+
+---
+
+5️⃣ Hedge Table
+
+CREATE TABLE CLO_HEDGE (
+
+    hedge_id VARCHAR(50) PRIMARY KEY,
+
+    loan_id VARCHAR(50),
+
+    hedge_amount DECIMAL(18,2),
+
+    trade_date DATE,
+
+    created_date TIMESTAMP,
+
+    FOREIGN KEY (loan_id)
+        REFERENCES CLO_LOAN(loan_id)
+);
+
+
+---
+
+6️⃣ Cycle Hedge Pool
+
+Freeze hedge supply per cycle.
+
+CREATE TABLE CLO_CYCLE_HEDGE_POOL (
+
+    pool_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    cycle_id VARCHAR(50),
+
+    hedge_id VARCHAR(50),
+
+    pool_amount DECIMAL(18,2),
+
+    FOREIGN KEY (cycle_id)
+        REFERENCES CLO_REPLENISHMENT_CYCLE(cycle_id),
+
+    FOREIGN KEY (hedge_id)
+        REFERENCES CLO_HEDGE(hedge_id)
+);
+
+
+---
+
+7️⃣ Program Table
+
+CREATE TABLE CLO_PROGRAM (
+
+    program_id VARCHAR(50) PRIMARY KEY,
+
+    program_name VARCHAR(200),
+
+    created_date TIMESTAMP
+);
+
+
+---
+
+8️⃣ Allocation Ledger (INSERT ONLY)
+
+CREATE TABLE CLO_HEDGE_ALLOCATIONS (
+
+    allocation_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    hedge_id VARCHAR(50),
+
+    program_id VARCHAR(50),
+
+    amount DECIMAL(18,2),
+
+    created_cycle_id VARCHAR(50),
+
+    created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (hedge_id)
+        REFERENCES CLO_HEDGE(hedge_id),
+
+    FOREIGN KEY (program_id)
+        REFERENCES CLO_PROGRAM(program_id),
+
+    FOREIGN KEY (created_cycle_id)
+        REFERENCES CLO_REPLENISHMENT_CYCLE(cycle_id)
+);
+
+This table already acts as history + ledger.
+
+
+---
+
+2️⃣ Hiding Snapshot vs Live Loan Data (Important)
+
+You asked:
+
+> Can we hide switching between snapshot and live loan attributes?
+
+
+
+Yes — a view is the correct solution.
+
+
+---
+
+Loan Attribute View
+
+CREATE VIEW VW_CLO_LOAN_ATTRIBUTES AS
+
+SELECT
+c.cycle_id,
+l.loan_id,
+
+CASE
+WHEN CURRENT_DATE > c.freeze_static_update_date
+THEN s.rating
+ELSE i.rating
+END AS rating,
+
+CASE
+WHEN CURRENT_DATE > c.freeze_static_update_date
+THEN s.industry
+ELSE i.industry
+END AS industry,
+
+CASE
+WHEN CURRENT_DATE > c.freeze_static_update_date
+THEN s.country
+ELSE i.country
+END AS country,
+
+CASE
+WHEN CURRENT_DATE > c.freeze_static_update_date
+THEN s.spread
+ELSE i.spread
+END AS spread
+
+FROM CLO_REPLENISHMENT_CYCLE c
+
+JOIN CLO_LOAN l ON 1=1
+
+LEFT JOIN CLO_LOAN_INVENTORY i
+ON l.loan_id = i.loan_id
+
+LEFT JOIN CLO_LOAN_STATIC_SNAPSHOT s
+ON s.loan_id = l.loan_id
+AND s.cycle_id = c.cycle_id;
+
+Now rule queries never care about snapshot logic.
+
+They simply use:
+
+VW_CLO_LOAN_ATTRIBUTES
+
+
+---
+
+3️⃣ Core Operational Queries
+
+
+---
+
+Query 1 — Load Hedge Pool For Cycle
+
+Before request_stop_date.
+
+INSERT INTO CLO_CYCLE_HEDGE_POOL
+(
+cycle_id,
+hedge_id,
+pool_amount
+)
+
+SELECT
+:cycle_id,
+hedge_id,
+hedge_amount
+FROM CLO_HEDGE
+WHERE trade_date <= CURRENT_DATE;
+
+
+---
+
+Query 2 — Snapshot Loan Attributes
+
+Triggered when:
+
+freeze_static_update_date reached
+
+INSERT INTO CLO_LOAN_STATIC_SNAPSHOT
+(
+cycle_id,
+loan_id,
+rating,
+industry,
+country,
+spread,
+maturity_date,
+snapshot_date
+)
+
+SELECT
+:cycle_id,
+loan_id,
+rating,
+industry,
+country,
+spread,
+maturity_date,
+CURRENT_DATE
+FROM CLO_LOAN_INVENTORY;
+
+
+---
+
+Query 3 — Insert Allocation
+
+INSERT INTO CLO_HEDGE_ALLOCATIONS
+(
+hedge_id,
+program_id,
+amount,
+created_cycle_id
+)
+VALUES
+(:hedge_id, :program_id, :amount, :cycle_id);
+
+
+---
+
+Query 4 — Program Exposure
+
+SELECT
+program_id,
+SUM(amount) exposure
+FROM CLO_HEDGE_ALLOCATIONS
+WHERE created_cycle_id = :cycle_id
+GROUP BY program_id;
+
+
+---
+
+Query 5 — Hedge Utilization
+
+SELECT
+hedge_id,
+SUM(amount) used_amt
+FROM CLO_HEDGE_ALLOCATIONS
+WHERE created_cycle_id = :cycle_id
+GROUP BY hedge_id;
+
+
+---
+
+Query 6 — Remaining Hedge
+
+SELECT
+p.hedge_id,
+p.pool_amount - COALESCE(SUM(a.amount),0) remaining_amt
+FROM CLO_CYCLE_HEDGE_POOL p
+
+LEFT JOIN CLO_HEDGE_ALLOCATIONS a
+ON p.hedge_id = a.hedge_id
+AND a.created_cycle_id = p.cycle_id
+
+WHERE p.cycle_id = :cycle_id
+
+GROUP BY
+p.hedge_id,
+p.pool_amount;
+
+
+---
+
+Query 7 — Rule Evaluation (Example)
+
+Example rule:
+
+Loan rating must be >= BB
+
+SELECT
+a.program_id,
+h.hedge_id,
+v.rating
+
+FROM CLO_HEDGE_ALLOCATIONS a
+
+JOIN CLO_HEDGE h
+ON a.hedge_id = h.hedge_id
+
+JOIN VW_CLO_LOAN_ATTRIBUTES v
+ON v.loan_id = h.loan_id
+AND v.cycle_id = a.created_cycle_id
+
+WHERE v.rating < 'BB';
+
+Notice:
+
+Rule query does NOT know about snapshot vs live data.
+
+
+---
+
+4️⃣ UI Exposure Query (Very Useful)
+
+One query for the UI dashboard.
+
+SELECT
+p.program_id,
+SUM(a.amount) program_exposure,
+COUNT(DISTINCT a.hedge_id) hedge_count
+FROM CLO_HEDGE_ALLOCATIONS a
+JOIN CLO_PROGRAM p
+ON a.program_id = p.program_id
+WHERE a.created_cycle_id = :cycle_id
+GROUP BY p.program_id;
+
+
+---
+
+5️⃣ Final Architecture
+
+CLO_REPLENISHMENT_CYCLE
+        │
+        │
+CLO_LOAN_INVENTORY  (live)
+        │
+        ├── snapshot → CLO_LOAN_STATIC_SNAPSHOT
+        │
+        ▼
+VW_CLO_LOAN_ATTRIBUTES  ← rule engine reads here
+
+CLO_HEDGE
+        │
+        ▼
+CLO_CYCLE_HEDGE_POOL
+        │
+        ▼
+CLO_HEDGE_ALLOCATIONS  (insert-only ledger)
+
+
+---
+
+6️⃣ Why This Design Is Strong
+
+✔ clean separation of live vs frozen data
+✔ rule engine stays simple
+✔ allocation history preserved
+✔ cycle isolation guaranteed
+✔ queries stay stable even if business logic changes
+
+This is very similar to designs used in large trading allocation engines.
+
+
+---
+
+✅ If you'd like, I can also show you one advanced improvement used in CLO systems:
+
+“Cycle Views Layer”
+
+Where ALL operational queries become just 3 views, which dramatically simplifies the Spring Boot service + React UI.
