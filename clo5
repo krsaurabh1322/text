@@ -443,3 +443,240 @@ Sequence Diagrams for Daily Sync, Allocation, and Freeze
 
 
 Those sections are usually required for architecture governance approvals.
+
+
+
+
+This is a very important architectural question, and you're thinking about the correct problem.
+
+You want:
+
+Same allocation query
+
+Before pool creation → read CLO_HEDGE
+
+After pool creation → read CLO_CYCLE_HEDGE_POOL
+
+No change in application code
+
+
+The clean way to achieve this is using a database VIEW that dynamically resolves the source.
+
+
+---
+
+1. Core Idea
+
+Your application never queries tables directly.
+
+Instead it always queries:
+
+CLO_ACTIVE_HEDGE_SOURCE
+
+This view decides:
+
+Before freeze  → CLO_HEDGE
+After freeze   → CLO_CYCLE_HEDGE_POOL
+
+So allocation query never changes.
+
+
+---
+
+2. Allocation Query (Always Same)
+
+Your allocation engine always runs:
+
+SELECT
+    hedge_id,
+    loan_id,
+    request_amount
+FROM CLO_ACTIVE_HEDGE_SOURCE
+WHERE program_id = :program_id
+AND status = 'OPEN';
+
+The application does not know which table is used.
+
+
+---
+
+3. Cycle State Table
+
+You maintain cycle state in:
+
+CLO_REPLENISHMENT_CYCLE
+
+Example
+
+cycle_id	status	hedge_pool_created
+
+2026_02	ACTIVE	N
+2026_02	ACTIVE	Y
+
+
+
+---
+
+4. View Logic
+
+The view dynamically switches source.
+
+CREATE OR REPLACE VIEW CLO_ACTIVE_HEDGE_SOURCE AS
+
+SELECT *
+FROM CLO_HEDGE h
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM CLO_REPLENISHMENT_CYCLE c
+    WHERE c.cycle_id = h.cycle_id
+    AND c.hedge_pool_created = 'Y'
+)
+
+UNION ALL
+
+SELECT *
+FROM CLO_CYCLE_HEDGE_POOL p
+WHERE EXISTS (
+    SELECT 1
+    FROM CLO_REPLENISHMENT_CYCLE c
+    WHERE c.cycle_id = p.cycle_id
+    AND c.hedge_pool_created = 'Y'
+);
+
+
+---
+
+5. What Happens During Cycle
+
+Phase 1 — Before Pool Creation
+
+Tables
+
+CLO_HEDGE             → growing
+CLO_CYCLE_HEDGE_POOL  → empty
+
+View resolves to
+
+CLO_HEDGE
+
+Allocation query reads hedges directly.
+
+
+---
+
+Phase 2 — Pool Creation
+
+Camunda runs:
+
+INSERT INTO CLO_CYCLE_HEDGE_POOL
+SELECT *
+FROM CLO_HEDGE
+WHERE created_date <= :cutoff_date;
+
+Then:
+
+UPDATE CLO_REPLENISHMENT_CYCLE
+SET hedge_pool_created = 'Y'
+WHERE cycle_id = :cycle_id;
+
+
+---
+
+Phase 3 — After Pool Creation
+
+Now view resolves to:
+
+CLO_CYCLE_HEDGE_POOL
+
+Same query automatically uses pool.
+
+No application change.
+
+
+---
+
+6. Visual Flow
+
+Application Query
+        |
+        v
+CLO_ACTIVE_HEDGE_SOURCE (VIEW)
+        |
+        +-------------------------+
+        |                         |
+Cycle pool not created     Pool created
+        |                         |
+        v                         v
+CLO_HEDGE               CLO_CYCLE_HEDGE_POOL
+
+
+---
+
+7. Why This Works Well
+
+Zero Code Change
+
+Allocation logic is stable.
+
+
+---
+
+Clean lifecycle control
+
+Camunda only flips:
+
+hedge_pool_created = Y
+
+
+---
+
+Query simplicity
+
+Allocation query stays small.
+
+
+---
+
+8. Even Better Version (Production Pattern)
+
+Most systems simplify this further.
+
+Instead of switching tables, they assign cycle_id during pool creation.
+
+Example:
+
+CLO_HEDGE
+
+hedge_id	cycle_id	status
+
+H1	2026_02	OPEN
+H2	2026_02	OPEN
+
+
+Allocation query simply becomes:
+
+SELECT *
+FROM CLO_HEDGE
+WHERE cycle_id = :cycle_id;
+
+No pool table required.
+
+But this depends on whether hedges can participate in multiple cycles.
+
+
+---
+
+9. Recommendation for Your Design
+
+Given your earlier architecture, best pattern is:
+
+CLO_HEDGE                → master hedge requests
+CLO_CYCLE_HEDGE_POOL     → frozen supply
+CLO_ACTIVE_HEDGE_SOURCE  → switching view
+
+Application queries only the view.
+
+
+---
+
+If you'd like, I can also show you a much cleaner architecture used in large allocation engines that removes both the pool table and the switching view and still guarantees freeze consistency. It's actually simpler than what you have now.
