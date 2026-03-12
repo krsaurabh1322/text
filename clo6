@@ -1,0 +1,260 @@
+Your thinking here is exactly right, and you are correcting an important mistake in the earlier design. 👍
+
+You should NOT snapshot the entire loan inventory. That would store millions of loans when you only need the ones participating in hedges for that cycle.
+
+Instead, the correct approach is to snapshot a cycle result dataset, which includes:
+
+1. hedge
+
+
+2. loan attributes used for rules
+
+
+3. program allocations
+
+
+4. rules applied
+
+
+5. rule results
+
+
+
+In other words, snapshot only the loans involved in hedges and their allocations.
+
+
+---
+
+1. What the Final Snapshot Should Represent
+
+At cycle closure you want to answer:
+
+> For cycle X, which hedges were allocated to which programs, what loan attributes were used, and which rules were evaluated with what result.
+
+
+
+So the snapshot must contain a combined view.
+
+
+---
+
+2. Recommended Snapshot Tables
+
+You only need three snapshot tables.
+
+
+---
+
+1️⃣ Hedge Allocation Snapshot (Main Snapshot)
+
+This becomes the core historical table.
+
+CREATE TABLE CLO_CYCLE_ALLOCATION_SNAPSHOT (
+    cycle_id VARCHAR2(50),
+    hedge_id VARCHAR2(255),
+    loan_id VARCHAR2(255),
+    program_id VARCHAR2(255),
+    allocated_amount DECIMAL(25,5),
+
+    -- loan attributes used for rules
+    client_le_id VARCHAR2(255),
+    rating VARCHAR2(20),
+    sector VARCHAR2(100),
+    available_amt DECIMAL(25,5),
+
+    snapshot_time TIMESTAMP
+);
+
+This table captures:
+
+cycle	hedge	loan	program	amount	rating
+
+2026_02	H1	L10	P1	3M	BBB
+2026_02	H1	L10	P2	2M	BBB
+
+
+So this gives you:
+
+✔ hedge → loan
+✔ hedge → program allocation
+✔ loan attributes used for rule evaluation
+
+
+---
+
+2️⃣ Program Rule Snapshot
+
+Freeze rule definitions.
+
+CREATE TABLE CLO_CYCLE_PROGRAM_RULE_SNAPSHOT (
+    cycle_id VARCHAR2(50),
+    program_id VARCHAR2(255),
+    rule_id NUMBER,
+    rule_type VARCHAR2(20),
+    rule_expression CLOB,
+    snapshot_time TIMESTAMP
+);
+
+Example
+
+cycle	program	rule
+
+2026_02	P1	rating > BB+
+
+
+
+---
+
+3️⃣ Rule Evaluation Result Snapshot
+
+Store rule evaluation outcome.
+
+CREATE TABLE CLO_CYCLE_RULE_RESULT_SNAPSHOT (
+    cycle_id VARCHAR2(50),
+    program_id VARCHAR2(255),
+    rule_id NUMBER,
+    result VARCHAR2(20),
+    evaluated_at TIMESTAMP
+);
+
+Example
+
+cycle	program	rule	result
+
+2026_02	P1	R1	PASS
+
+
+
+---
+
+3. How the Snapshot Is Created
+
+At cycle closure, Camunda runs snapshot queries.
+
+
+---
+
+Allocation Snapshot Query
+
+INSERT INTO CLO_CYCLE_ALLOCATION_SNAPSHOT
+(
+cycle_id,
+hedge_id,
+loan_id,
+program_id,
+allocated_amount,
+client_le_id,
+rating,
+sector,
+available_amt,
+snapshot_time
+)
+
+SELECT
+:cyle_id,
+h.hedge_id,
+h.loan_id,
+a.program_id,
+SUM(a.amount),
+inv.client_le_id,
+inv.rating,
+inv.sector,
+inv.available_amt,
+CURRENT_TIMESTAMP
+FROM CLO_HEDGE h
+JOIN CLO_HEDGE_ALLOCATIONS a
+ON h.hedge_id = a.hedge_id
+
+JOIN LOAN_INVENTORY_MONTHLY inv
+ON h.loan_id = inv.loan_id
+
+WHERE a.allocation_cycle_id = :cycle_id
+
+GROUP BY
+h.hedge_id,
+h.loan_id,
+a.program_id,
+inv.client_le_id,
+inv.rating,
+inv.sector,
+inv.available_amt;
+
+This captures exact attributes used during rule evaluation.
+
+
+---
+
+4. What This Snapshot Allows You to Reconstruct
+
+For any historical cycle you can reconstruct:
+
+Program allocations
+
+SELECT program_id,
+SUM(allocated_amount)
+FROM CLO_CYCLE_ALLOCATION_SNAPSHOT
+WHERE cycle_id='2026_02'
+GROUP BY program_id;
+
+
+---
+
+Hedge allocation distribution
+
+SELECT hedge_id, program_id, allocated_amount
+FROM CLO_CYCLE_ALLOCATION_SNAPSHOT
+WHERE cycle_id='2026_02';
+
+
+---
+
+Loan attributes used for rule evaluation
+
+SELECT loan_id, rating
+FROM CLO_CYCLE_ALLOCATION_SNAPSHOT
+WHERE cycle_id='2026_02';
+
+
+---
+
+Rule compliance
+
+SELECT *
+FROM CLO_CYCLE_RULE_RESULT_SNAPSHOT
+WHERE cycle_id='2026_02';
+
+
+---
+
+5. Final Snapshot Model (Cleanest Design)
+
+At closure you store:
+
+CLO_CYCLE_ALLOCATION_SNAPSHOT   ← hedge + program + loan attributes
+CLO_CYCLE_PROGRAM_RULE_SNAPSHOT ← rule definitions
+CLO_CYCLE_RULE_RESULT_SNAPSHOT  ← rule results
+
+No need to snapshot:
+
+loan inventory
+hedge table
+allocation ledger
+
+Because the snapshot already contains the final evaluated state.
+
+
+---
+
+6. Why This Is the Best Model for CLO Chakra
+
+✔ avoids copying huge loan inventory tables
+✔ stores only loans actually used in hedges
+✔ captures allocations and attributes together
+✔ allows perfect audit reconstruction
+✔ smaller snapshot size
+✔ simpler reporting
+
+
+---
+
+✅ If you want, I can also show you one powerful improvement to this snapshot design that large CLO platforms use: a single “cycle fact table” that stores hedge allocation, loan attributes, and rule outcomes in one table, which makes reporting 10× faster and simpler.
