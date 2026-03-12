@@ -487,3 +487,183 @@ This design gives:
 ---
 
 ✅ If you'd like, I can also show you how large banks compress all these snapshots into a single “CYCLE_RESULT_FACT” star schema, which makes reporting tools (PowerBI/Tableau) much faster and simpler for CLO analytics.
+
+
+Yes, you can combine rule definition and rule evaluation result into one snapshot table. In fact, this is often cleaner because for historical reporting you usually want:
+
+> Program + Rule + Result in one record
+
+
+
+This avoids joining two snapshot tables later.
+
+Let’s design it properly.
+
+
+---
+
+1. Combined Snapshot Table
+
+Create one table that stores:
+
+cycle
+
+program
+
+rule
+
+rule definition
+
+evaluation result
+
+evaluation timestamp
+
+
+Table
+
+CREATE TABLE CLO_CYCLE_PROGRAM_RULE_EVAL_SNAPSHOT (
+    cycle_id VARCHAR2(50),
+    program_id VARCHAR2(255),
+    rule_id NUMBER,
+    rule_type VARCHAR2(20),
+    rule_expression CLOB,
+    evaluation_result VARCHAR2(20),
+    evaluated_at TIMESTAMP,
+    snapshot_time TIMESTAMP
+);
+
+Example stored record:
+
+cycle	program	rule	rule_type	expression	result
+
+2026_02	P1	R1	EC	rating > BB+	PASS
+
+
+
+---
+
+2. Snapshot Query
+
+This query joins:
+
+rule definition table
+
+program rule assignment
+
+rule evaluation results
+
+
+INSERT INTO CLO_CYCLE_PROGRAM_RULE_EVAL_SNAPSHOT
+(
+    cycle_id,
+    program_id,
+    rule_id,
+    rule_type,
+    rule_expression,
+    evaluation_result,
+    evaluated_at,
+    snapshot_time
+)
+SELECT
+    res.cycle_id,
+    res.program_id,
+    r.rule_id,
+    r.rule_type,
+    r.rule_expression,
+    res.result,
+    res.evaluated_at,
+    CURRENT_TIMESTAMP
+FROM CLO_PROGRAM_RULE_RESULTS res
+JOIN CLO_PROGRAM_RULES r
+    ON res.rule_id = r.rule_id
+    AND res.program_id = r.program_id
+WHERE res.cycle_id = :cycle_id;
+
+
+---
+
+3. What This Captures
+
+For every rule evaluated for a program in that cycle, it stores:
+
+Field	Source
+
+cycle_id	rule result table
+program_id	rule result table
+rule_id	rule definition
+rule_type	rule definition
+rule_expression	rule definition
+evaluation_result	rule result table
+evaluated_at	rule result table
+
+
+So if rules change later, the snapshot still keeps the exact rule expression used.
+
+
+---
+
+4. Example
+
+Live Tables
+
+CLO_PROGRAM_RULES
+
+rule_id	program_id	rule_type	expression
+
+R1	P1	EC	rating > BB+
+
+
+CLO_PROGRAM_RULE_RESULTS
+
+cycle	program	rule	result
+
+2026_02	P1	R1	PASS
+
+
+
+---
+
+Snapshot Table
+
+CLO_CYCLE_PROGRAM_RULE_EVAL_SNAPSHOT
+
+cycle	program	rule	type	expression	result
+
+2026_02	P1	R1	EC	rating > BB+	PASS
+
+
+
+---
+
+5. Benefits of Combined Snapshot
+
+✔ fewer snapshot tables
+✔ easier historical queries
+✔ simpler reporting
+✔ faster dashboards
+
+Example query later:
+
+SELECT
+program_id,
+rule_expression,
+evaluation_result
+FROM CLO_CYCLE_PROGRAM_RULE_EVAL_SNAPSHOT
+WHERE cycle_id = '2026_02';
+
+
+---
+
+6. Where This Fits in Cycle Closure
+
+Camunda cycle closure workflow:
+
+1️⃣ Snapshot allocations + loan attributes
+2️⃣ Snapshot program configuration
+3️⃣ Snapshot rule definition + results (this table)
+4️⃣ Mark cycle CLOSED
+
+
+---
+
+✅ If you want, I can also show you one very powerful snapshot query that creates the entire cycle snapshot (allocations + loan attributes + programs + rules) in one SQL pipeline, which makes cycle closure extremely fast even with thousands of hedges and loans.
