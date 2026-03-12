@@ -258,3 +258,232 @@ Because the snapshot already contains the final evaluated state.
 ---
 
 ✅ If you want, I can also show you one powerful improvement to this snapshot design that large CLO platforms use: a single “cycle fact table” that stores hedge allocation, loan attributes, and rule outcomes in one table, which makes reporting 10× faster and simpler.
+
+
+
+
+Yes — that is a very good idea, and in most regulated financial systems program configuration is also snapshotted at cycle closure. Otherwise you may face this problem later:
+
+> “What were the exact program limits, attributes, and configuration when cycle 2026-02 closed?”
+
+
+
+If the program changes later, historical reporting becomes incorrect.
+
+So the correct approach is to snapshot program configuration together with allocations, rules, and loan attributes.
+
+
+---
+
+1. What Program Snapshot Should Capture
+
+Programs usually contain configuration like:
+
+program name
+
+target allocation
+
+limits
+
+sector limits
+
+rating constraints
+
+other parameters
+
+
+If these change later, historical results must still reflect the program definition at that time.
+
+So you snapshot the program metadata.
+
+
+---
+
+2. Program Snapshot Table
+
+Create:
+
+CLO_CYCLE_PROGRAM_SNAPSHOT
+
+CREATE TABLE CLO_CYCLE_PROGRAM_SNAPSHOT (
+    cycle_id VARCHAR2(50),
+    program_id VARCHAR2(255),
+    program_name VARCHAR2(255),
+    program_status VARCHAR2(30),
+    target_amount DECIMAL(25,5),
+    max_limit DECIMAL(25,5),
+    min_limit DECIMAL(25,5),
+    sector_limit VARCHAR2(100),
+    rating_limit VARCHAR2(50),
+    snapshot_time TIMESTAMP
+);
+
+Example snapshot
+
+cycle	program	target	limit
+
+2026_02	P1	10M	15M
+2026_02	P2	5M	10M
+
+
+
+---
+
+3. Snapshot Query
+
+At cycle closure, Camunda runs:
+
+INSERT INTO CLO_CYCLE_PROGRAM_SNAPSHOT
+(
+cycle_id,
+program_id,
+program_name,
+program_status,
+target_amount,
+max_limit,
+min_limit,
+sector_limit,
+rating_limit,
+snapshot_time
+)
+SELECT
+:cycle_id,
+program_id,
+program_name,
+status,
+target_amount,
+max_limit,
+min_limit,
+sector_limit,
+rating_limit,
+CURRENT_TIMESTAMP
+FROM CLO_PROGRAM;
+
+
+---
+
+4. Final Snapshot Architecture
+
+At cycle closure you will snapshot four key datasets.
+
+1️⃣ Allocation + Loan Attributes
+
+CLO_CYCLE_ALLOCATION_SNAPSHOT
+
+Contains
+
+hedge
+loan
+program
+allocated amount
+loan attributes
+
+
+---
+
+2️⃣ Program Configuration
+
+CLO_CYCLE_PROGRAM_SNAPSHOT
+
+Contains
+
+program definition
+limits
+targets
+status
+
+
+---
+
+3️⃣ Program Rules
+
+CLO_CYCLE_PROGRAM_RULE_SNAPSHOT
+
+Contains
+
+rule definitions
+rule expressions
+rule types
+
+
+---
+
+4️⃣ Rule Evaluation Results
+
+CLO_CYCLE_RULE_RESULT_SNAPSHOT
+
+Contains
+
+rule outcomes
+pass/fail
+
+
+---
+
+5. What This Allows in Historical Reporting
+
+Now you can reconstruct the entire cycle state.
+
+Example query:
+
+Program allocations with program configuration
+
+SELECT
+p.program_name,
+SUM(a.allocated_amount)
+FROM CLO_CYCLE_ALLOCATION_SNAPSHOT a
+JOIN CLO_CYCLE_PROGRAM_SNAPSHOT p
+ON a.program_id = p.program_id
+WHERE a.cycle_id = '2026_02'
+GROUP BY p.program_name;
+
+
+---
+
+Rules applied to program
+
+SELECT
+p.program_name,
+r.rule_expression
+FROM CLO_CYCLE_PROGRAM_RULE_SNAPSHOT r
+JOIN CLO_CYCLE_PROGRAM_SNAPSHOT p
+ON r.program_id = p.program_id
+WHERE r.cycle_id='2026_02';
+
+
+---
+
+6. Final Snapshot Model (Complete)
+
+At cycle closure you will have these snapshot tables:
+
+CLO_CYCLE_ALLOCATION_SNAPSHOT
+CLO_CYCLE_PROGRAM_SNAPSHOT
+CLO_CYCLE_PROGRAM_RULE_SNAPSHOT
+CLO_CYCLE_RULE_RESULT_SNAPSHOT
+
+Together they freeze:
+
+hedges
+loan attributes
+allocations
+program configuration
+rules
+rule results
+
+
+---
+
+7. Why This Is the Correct Financial Architecture
+
+This design gives:
+
+✔ full auditability
+✔ historical reproducibility
+✔ smaller snapshot size (no full inventory copy)
+✔ clear program configuration history
+
+
+---
+
+✅ If you'd like, I can also show you how large banks compress all these snapshots into a single “CYCLE_RESULT_FACT” star schema, which makes reporting tools (PowerBI/Tableau) much faster and simpler for CLO analytics.
