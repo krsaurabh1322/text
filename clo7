@@ -1,0 +1,414 @@
+Good — now that I see your actual schema from the screenshots, we can keep most of your design intact and only add the cycle participation table. That way we reuse what you already have:
+
+Existing tables (from your design):
+
+LH_CLO_HEDGE
+
+LH_CLO_HEDGE_ALLOCATIONS
+
+LH_CLO_PROGRAM
+
+LH_CLO_REPLENISHMENT_CYCLE
+
+LH_LOAN_INVENTORY_DAILY / MONTHLY
+
+
+Add one table only:
+
+LH_CLO_CYCLE_HEDGE_PARTICIPATION
+
+And then define all operational queries Camunda will run.
+
+
+---
+
+1. New Table (Participation)
+
+CREATE TABLE LH_CLO_CYCLE_HEDGE_PARTICIPATION (
+    cycle_id VARCHAR2(255),
+    hedge_id VARCHAR2(255),
+    cycle_supply_amt DECIMAL(25,5),
+    created_date TIMESTAMP,
+
+    PRIMARY KEY (cycle_id, hedge_id),
+
+    FOREIGN KEY (cycle_id)
+        REFERENCES LH_CLO_REPLENISHMENT_CYCLE(cycle_id),
+
+    FOREIGN KEY (hedge_id)
+        REFERENCES LH_CLO_HEDGE(hedge_id)
+);
+
+Purpose:
+
+tracks hedge supply entering each cycle
+
+
+---
+
+2. When New Hedge Arrives
+
+Camunda receives hedge request from Hedge System.
+
+Insert into CLO_HEDGE
+
+INSERT INTO LH_CLO_HEDGE
+(
+ hedge_id,
+ limit_id,
+ client_le_id,
+ req_type,
+ extension_type,
+ reqd_hedge_amt,
+ hedge_deadline_date,
+ created_cycle_id,
+ CRE_BY,
+ CRE_DATE
+)
+VALUES
+(
+ :hedge_id,
+ :limit_id,
+ :client_le_id,
+ :req_type,
+ :extension_type,
+ :req_amt,
+ :deadline,
+ :cycle_id,
+ :user,
+ CURRENT_TIMESTAMP
+);
+
+
+---
+
+Insert Participation for Current Cycle
+
+INSERT INTO LH_CLO_CYCLE_HEDGE_PARTICIPATION
+(
+ cycle_id,
+ hedge_id,
+ cycle_supply_amt,
+ created_date
+)
+VALUES
+(
+ :cycle_id,
+ :hedge_id,
+ :req_amt,
+ CURRENT_TIMESTAMP
+);
+
+So hedge becomes available in that cycle immediately.
+
+
+---
+
+3. Query — Hedge Available Amount in a Cycle
+
+This is the most used query for allocation UI.
+
+SELECT
+p.cycle_id,
+p.hedge_id,
+p.cycle_supply_amt
+    - COALESCE(SUM(a.amount),0) remaining_amt
+FROM LH_CLO_CYCLE_HEDGE_PARTICIPATION p
+LEFT JOIN LH_CLO_HEDGE_ALLOCATIONS a
+ON p.hedge_id = a.hedge_id
+AND a.allocation_cycle_id = p.cycle_id
+WHERE p.cycle_id = :cycle_id
+GROUP BY
+p.cycle_id,
+p.hedge_id,
+p.cycle_supply_amt;
+
+
+---
+
+4. Query — Allocate Hedge to Program
+
+Camunda triggers allocation.
+
+Insert ledger entry.
+
+INSERT INTO LH_CLO_HEDGE_ALLOCATIONS
+(
+ hedge_id,
+ program_id,
+ amount,
+ txn_type,
+ allocation_cycle_id,
+ CRE_BY,
+ CRE_DATE
+)
+VALUES
+(
+ :hedge_id,
+ :program_id,
+ :amount,
+ 'INCREASE',
+ :cycle_id,
+ :user,
+ CURRENT_TIMESTAMP
+);
+
+Ledger design means:
+
+never update
+never delete
+
+
+---
+
+5. Query — Reduce Allocation
+
+INSERT INTO LH_CLO_HEDGE_ALLOCATIONS
+(
+ hedge_id,
+ program_id,
+ amount,
+ txn_type,
+ allocation_cycle_id,
+ CRE_BY,
+ CRE_DATE
+)
+VALUES
+(
+ :hedge_id,
+ :program_id,
+ :amount,
+ 'REDUCE',
+ :cycle_id,
+ :user,
+ CURRENT_TIMESTAMP
+);
+
+
+---
+
+6. Query — Allocation of a Hedge Across Programs
+
+SELECT
+a.program_id,
+SUM(
+CASE
+WHEN a.txn_type = 'INCREASE' THEN a.amount
+WHEN a.txn_type = 'REDUCE' THEN -a.amount
+END
+) allocated_amt
+FROM LH_CLO_HEDGE_ALLOCATIONS a
+WHERE a.hedge_id = :hedge_id
+AND a.allocation_cycle_id = :cycle_id
+GROUP BY a.program_id;
+
+Result example:
+
+program	allocated
+
+P1	3M
+P2	2M
+
+
+
+---
+
+7. Query — Program Allocation from Different Hedges
+
+SELECT
+a.program_id,
+a.hedge_id,
+SUM(
+CASE
+WHEN a.txn_type = 'INCREASE' THEN a.amount
+WHEN a.txn_type = 'REDUCE' THEN -a.amount
+END
+) allocated_amt
+FROM LH_CLO_HEDGE_ALLOCATIONS a
+WHERE a.program_id = :program_id
+AND a.allocation_cycle_id = :cycle_id
+GROUP BY
+a.program_id,
+a.hedge_id;
+
+Example:
+
+program	hedge	amount
+
+P1	H1	3M
+P1	H2	1M
+
+
+
+---
+
+8. Query — Total Allocation Per Program
+
+SELECT
+program_id,
+SUM(
+CASE
+WHEN txn_type='INCREASE' THEN amount
+WHEN txn_type='REDUCE' THEN -amount
+END
+) total_allocated
+FROM LH_CLO_HEDGE_ALLOCATIONS
+WHERE allocation_cycle_id = :cycle_id
+GROUP BY program_id;
+
+
+---
+
+9. Query — Remaining Hedge for Next Cycle
+
+When new cycle starts, Camunda calculates rollover.
+
+SELECT
+p.hedge_id,
+p.cycle_supply_amt
+    - COALESCE(SUM(a.amount),0) remaining_amt
+FROM LH_CLO_CYCLE_HEDGE_PARTICIPATION p
+LEFT JOIN LH_CLO_HEDGE_ALLOCATIONS a
+ON p.hedge_id = a.hedge_id
+AND a.allocation_cycle_id = p.cycle_id
+WHERE p.cycle_id = :prev_cycle
+GROUP BY
+p.hedge_id,
+p.cycle_supply_amt
+HAVING
+p.cycle_supply_amt - COALESCE(SUM(a.amount),0) > 0;
+
+
+---
+
+Insert Rollover
+
+INSERT INTO LH_CLO_CYCLE_HEDGE_PARTICIPATION
+(
+ cycle_id,
+ hedge_id,
+ cycle_supply_amt,
+ created_date
+)
+SELECT
+:next_cycle,
+hedge_id,
+remaining_amt,
+CURRENT_TIMESTAMP
+FROM (previous query);
+
+
+---
+
+10. Cycle Snapshot Query (Your Screenshot)
+
+Your screenshot query is almost correct.
+
+But yes — it should use participation table.
+
+Corrected snapshot query:
+
+INSERT INTO LH_CLO_CYCLE_ALLOCATION_SNAPSHOT
+(
+cycle_id,
+hedge_id,
+limit_id,
+client_le_id,
+program_id,
+allocated_amount,
+rating,
+sector,
+snapshot_time
+)
+
+SELECT
+:cycle_id,
+h.hedge_id,
+h.limit_id,
+h.client_le_id,
+a.program_id,
+
+SUM(
+CASE
+WHEN a.txn_type='INCREASE' THEN a.amount
+WHEN a.txn_type='REDUCE' THEN -a.amount
+END
+),
+
+inv.rating,
+inv.sector,
+
+CURRENT_TIMESTAMP
+
+FROM LH_CLO_CYCLE_HEDGE_PARTICIPATION p
+
+JOIN LH_CLO_HEDGE h
+ON p.hedge_id = h.hedge_id
+
+JOIN LH_CLO_HEDGE_ALLOCATIONS a
+ON h.hedge_id = a.hedge_id
+
+JOIN LH_LOAN_INVENTORY_MONTHLY inv
+ON h.limit_id = inv.limit_id
+AND h.client_le_id = inv.client_le_id
+
+WHERE p.cycle_id = :cycle_id
+AND a.allocation_cycle_id = :cycle_id
+
+GROUP BY
+h.hedge_id,
+h.limit_id,
+h.client_le_id,
+a.program_id,
+inv.rating,
+inv.sector;
+
+
+---
+
+11. Why Snapshot Should Use Participation Table
+
+Because snapshot should capture:
+
+hedges participating in that cycle
+
+not:
+
+all hedges ever created
+
+Participation table guarantees correct supply scope.
+
+
+---
+
+12. Final Data Flow
+
+Hedge arrives
+      ↓
+LH_CLO_HEDGE
+      ↓
+Participation created
+      ↓
+LH_CLO_CYCLE_HEDGE_PARTICIPATION
+      ↓
+Allocations happen
+      ↓
+LH_CLO_HEDGE_ALLOCATIONS
+      ↓
+Cycle closes
+      ↓
+Snapshot tables
+
+
+---
+
+If you want, I can also show you one very powerful “single exposure query” used by trading desks, which produces in one result:
+
+HEDGE
+LOAN
+PROGRAM
+ALLOCATED
+REMAINING
+RULE_STATUS
+
+That query usually simplifies the React UI massively and avoids many backend APIs.
