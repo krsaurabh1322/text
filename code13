@@ -44,3 +44,33 @@ Now, let’s say you insert 9 entries into an `IMap`. These entries will be hash
 - **Replication** ensures that backup copies of each partition are stored on different nodes to maintain fault tolerance.
 
 So, even if you store only 9 entries, Hazelcast will still use 271 partitions, and each entry will be assigned to a specific partition. The partitions that contain your entries will be spread across the 3 nodes in the cluster.
+
+view automatically resolves to either daily or monthly.
+
+CREATE OR REPLACE VIEW LH_LOAN_INVENTORY_ACTIVE AS
+
+SELECT
+limit_id,
+client_le_id,
+rating,
+sector
+FROM LH_LOAN_INVENTORY_DAILY
+WHERE CURRENT_DATE <
+(
+    SELECT freeze_static_update_date
+    FROM LH_CLO_ACTIVE_CYCLE
+)
+
+UNION ALL
+
+SELECT
+limit_id,
+client_le_id,
+rating,
+sector
+FROM LH_LOAN_INVENTORY_MONTHLY
+WHERE CURRENT_DATE >=
+(
+    SELECT freeze_static_update_date
+    FROM LH_CLO_ACTIVE_CYCLE
+);
