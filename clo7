@@ -412,3 +412,217 @@ REMAINING
 RULE_STATUS
 
 That query usually simplifies the React UI massively and avoids many backend APIs.
+
+
+
+
+Good question. The correct architecture is: UI sends the new value, backend calculates the delta.
+The UI should NOT calculate increase/decrease.
+
+
+---
+
+1. Why UI Should Not Calculate Delta
+
+If the UI sends:
+
++5
+or
+-10
+
+there are problems:
+
+Problem 1 — Concurrency
+
+Two users editing at the same time.
+
+Example:
+
+Current allocation:
+
+45
+
+User A changes to:
+
+50
+
+User B changes to:
+
+55
+
+If UI sends deltas:
+
+User A sends +5
+User B sends +10
+
+Final ledger becomes:
+
+45 + 5 + 10 = 60   ❌ WRONG
+
+Correct value should be:
+
+55
+
+
+---
+
+Problem 2 — Trust
+
+Backend must be the source of truth.
+UI should not contain business logic.
+
+
+---
+
+2. Correct Flow
+
+UI sends the desired value
+
+Example request:
+
+{
+  "cycleId": "2026_02",
+  "hedgeId": "H1",
+  "programId": "P1",
+  "newAllocation": 50
+}
+
+
+---
+
+3. Backend Calculates Delta
+
+Backend first calculates current allocation.
+
+SELECT
+SUM(
+CASE
+WHEN txn_type='INCREASE' THEN amount
+WHEN txn_type='REDUCE' THEN -amount
+END
+) allocated_amt
+FROM LH_CLO_HEDGE_ALLOCATIONS
+WHERE hedge_id = :hedge_id
+AND program_id = :program_id
+AND allocation_cycle_id = :cycle_id;
+
+Example result:
+
+45
+
+
+---
+
+4. Backend Computes Difference
+
+delta = new_value - current_value
+
+Example:
+
+50 - 45 = +5
+
+
+---
+
+5. Backend Inserts Ledger Entry
+
+INSERT INTO LH_CLO_HEDGE_ALLOCATIONS
+(
+hedge_id,
+program_id,
+amount,
+txn_type,
+allocation_cycle_id
+)
+VALUES
+(
+:HEDGE_ID,
+:PROGRAM_ID,
+ABS(:DELTA),
+CASE WHEN :DELTA > 0 THEN 'INCREASE' ELSE 'REDUCE' END,
+:CYCLE_ID
+);
+
+
+---
+
+6. Ledger After Edit
+
+txn	amount	type
+
+1	45	INCREASE
+2	5	INCREASE
+
+
+Effective allocation:
+
+50
+
+
+---
+
+7. UI Simplicity
+
+UI only displays current value and sends new value.
+
+Example:
+
+User types 50
+
+Backend handles everything else.
+
+
+---
+
+8. Even Better API Design
+
+Send both values to help validation.
+
+{
+  "cycleId": "2026_02",
+  "hedgeId": "H1",
+  "programId": "P1",
+  "previousAllocation": 45,
+  "newAllocation": 50
+}
+
+Backend still recomputes using DB but can detect:
+
+stale UI data
+
+
+---
+
+9. Final Architecture Rule
+
+Layer	Responsibility
+
+UI	collect new value
+Backend	calculate delta
+Database	store ledger
+
+
+
+---
+
+10. Recommended Flow for Your CLO System
+
+React UI
+   ↓
+POST /allocation
+   ↓
+Spring Boot Service
+   ↓
+1 read current allocation
+2 compute delta
+3 insert ledger record
+
+
+---
+
+✅ This is exactly how trading systems, hedge allocation systems, and inventory allocation engines implement editable allocations.
+
+
+---
+
+If you want, I can also show you a very powerful SQL view called CURRENT_HEDGE_ALLOCATIONS that will make the UI query extremely simple and avoid aggregation logic everywhere in the system.
