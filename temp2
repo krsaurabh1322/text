@@ -9,3 +9,7 @@ Best regards,
 [Your Name]
 Next Steps
 Would you like me to help you draft a brief agenda for that deep-dive session to ensure we cover all the integration points Ranganath is interested in?
+We have an **OpenFin runtime on client machines, which hosts our React application using an embedded Chromium engine.
+In the earlier setup, the React app connected directly to Solace using the Solace JavaScript client over secure WebSocket (mTLS), and received real-time data via pub-sub topics.
+In the new architecture, Solace has been removed. The React app now connects to a backend Java service using WebSocket (wss).
+This backend is a long-running service (built using Guava/Guice) that acts as a gateway—it communicates with downstream systems using gRPC and streams data back to the UI over WebSocket.
