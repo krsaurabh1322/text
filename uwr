@@ -46,3 +46,10 @@ Now, ask Copilot to synthesize everything into the final design.
 > 
 ### 💡 Pro-Tip for Copilot Usage
 To keep the context clean, use **file references** explicitly while running these prompts. In Copilot Chat, type #file:YourEntity.java or #folder:src/main/java to pinpoint exactly where the agent should look during Steps 1 and 2. This prevents the LLM from scanning unrelated test files or build logs.
+
+
+
+
+This is the second time we are facing issues with the laptop setup for this employee. The system was not configured properly during the initial setup, and the employee is now required to travel to Gurugram to get it fixed.
+As a result, we are losing productive work hours since the employee is currently unable to use the laptop and perform regular duties. We would appreciate it if this issue could be treated as a priority and resolved at the earliest. Additionally, it would be helpful to understand how we can avoid similar setup issues in the future.
+Thank you for your support.
