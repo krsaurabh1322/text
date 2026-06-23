@@ -1,0 +1,48 @@
+To handle a complex, multi-step migration like this, relying on a single, massive prompt often leads to the AI losing context or hallucinating details. Instead, you will get the best results by building a **structured prompt sequence** or defining an **Agent Persona** within GitHub Copilot Chat (or Copilot Workspace).
+Since your target app is built on Spring Boot and your source app uses JPA/Java to move from PostgreSQL to Oracle, you need the agent to act as a Data Architect and Migration Specialist.
+Here is the Agent definition and the multi-step prompt blueprint to execute this.
+## 🤖 The Custom Agent / Persona Definition
+If you are using Copilot Chat, paste this system prompt at the beginning of your session to anchor the agent's behavior:
+```text
+You are an expert Enterprise Data Architect and Java/Spring Boot Migration Specialist. Your objective is to analyze a source Java/JPA application utilizing a PostgreSQL database, map its domain model and database views, analyze the target Spring Boot application's design, and engineer a highly efficient, production-ready target data model for Oracle.
+
+When designing the target Oracle database schema, you must strictly adhere to Oracle-specific best practices, including:
+1. Handling Oracle identifier limits (30-character limits if targeting older compatibility, or 128-character limits for modern Oracle versions).
+2. Leveraging appropriate data types (e.g., VARCHAR2 instead of VARCHAR/TEXT, NUMBER for sequences/numeric fields, TIMESTAMP WITH TIME ZONE where appropriate).
+3. Translating PostgreSQL-specific features (like JSONB, UUID, or specific indexing types) into high-performance Oracle equivalents.
+4. Designing efficient surrogate key strategies (e.g., IDENTITY columns or sequences).
+5. Ensuring the final schema naturally maps to Spring Boot / Spring Data JPA architectures.
+
+```
+## 📑 The Multi-Step Execution Prompt Sequence
+Run these prompts sequentially within your workspace so Copilot can build on top of its own analysis.
+### Step 1: Source Application & JPA Entity Scanning
+Open your source codebase in the workspace and execute this prompt:
+> **Prompt:** > Scan the workspace for all Java classes annotated with @Entity, @Table, or @MappedSuperclass. Catalog every entity found. For each entity, extract:
+>  1. The mapped PostgreSQL table name.
+>  2. All fields, their data types, and their JPA annotations (e.g., @Id, @GeneratedValue, @Column, @Enumerated).
+>  3. All relationships (@OneToMany, @ManyToOne, @ManyToMany, @OneToOne) and their fetch types/cascade behaviors.
+>    Provide a clean, structured Markdown summary of this source domain model.
+> 
+### Step 2: Database View Analysis
+If your database views are defined via JPA (using @Subselect) or found in your SQL/Liquibase/Flyway migration scripts, point Copilot to them:
+> **Prompt:** > Locate and analyze all database views used by the source application (check for @Subselect annotations in Java or raw SQL files in the migration/resources folder). For each view:
+>  1. Identify the underlying PostgreSQL source tables it queries.
+>  2. Map the business logic or aggregations being performed within the view.
+>  3. Note any complex joins, window functions, or PostgreSQL-specific operators used.
+>    Summarize how these views support the current application's read/write patterns.
+> 
+### Step 3: Target Application Design Synthesis
+Open your target Spring Boot project directory (or share its architectural specification documents/DTOs):
+> **Prompt:** > Analyze the target Spring Boot application design/structure in the workspace. Identify the core business domains, performance requirements, and any updated architectural patterns (such as microservices boundaries, CQRS, or new DTO definitions) that differ from the source app. Explain how the data access requirements of this target app compare to the source app.
+> 
+### Step 4: Final Oracle Target Data Model Generation
+Now, ask Copilot to synthesize everything into the final design.
+> **Prompt:** > Based on the source PostgreSQL JPA entities, the analyzed database views, and the architectural design of the target Spring Boot application, design an optimized, efficient target data model for **Oracle**.
+> Provide the following output:
+>  1. **Data Model Recommendations:** A detailed explanation of modified, consolidated, or new tables/views required to optimize performance in Oracle for the target app.
+>  2. **DDL Scripts:** Production-ready Oracle SQL DDL statements (including CREATE TABLE, primary keys, foreign keys, constraints, and sequences/identity configurations). Ensure strict adherence to Oracle naming conventions and data types (VARCHAR2, NUMBER, etc.).
+>  3. **Spring Boot JPA Entities:** The corresponding Java entity code for the target Spring Boot application, fully optimized with Lombok and standard Jakarta/Spring Data JPA annotations mapping to the new Oracle schema.
+> 
+### 💡 Pro-Tip for Copilot Usage
+To keep the context clean, use **file references** explicitly while running these prompts. In Copilot Chat, type #file:YourEntity.java or #folder:src/main/java to pinpoint exactly where the agent should look during Steps 1 and 2. This prevents the LLM from scanning unrelated test files or build logs.
