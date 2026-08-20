@@ -1,0 +1,28 @@
+Using .vscode/mcp.json is actually the exact right approach for making tools visible to Copilot Agent mode and subagents without relying on regular VS Code UI extensions.
+When you configure an MCP server in mcp.json, VS Code's Agent Host reads it natively and exposes those tools directly to Copilot and its subagents during execution.
+Here is how you set up the Oracle MCP server cleanly inside your workspace configuration:
+1. Create or Update .vscode/mcp.json
+In the root directory of your workspace, open .vscode/mcp.json (create the file if it doesn't exist) and define your Oracle database server using standard I/O (stdio):
+{
+  "servers": {
+    "oracleDatabase": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-oracle-database"],
+      "env": {
+        "ORACLE_CONNECTION_STRING": "localhost:1521/XE",
+        "ORACLE_USER": "your_username",
+        "ORACLE_PASSWORD": "your_password",
+        "ENFORCE_READ_ONLY_QUERIES": "true"
+      }
+    }
+  }
+}
+
+2. Why this works for Subagents
+ * Native Integration: Copilot reads the mcp.json file directly at startup, spinning up the database process locally in the background.
+ * Subagent Visibility: Because the server is registered in the workspace MCP schema, any subagents spawned by Copilot inherit these tools automatically, allowing them to inspect schemas or query the database as part of a multi-step task workflow.
+3. Alternative (User-Level Scope)
+If you want the Oracle database connection available to Copilot across all your VS Code projects without committing credentials to a specific repository, place the exact same JSON block into your global user configuration file instead:
+ * Windows: %APPDATA%\Code\User\mcp.json
+ * macOS/Linux: ~/.config/Code/User/mcp.json
