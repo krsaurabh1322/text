@@ -26,3 +26,32 @@ In the root directory of your workspace, open .vscode/mcp.json (create the file 
 If you want the Oracle database connection available to Copilot across all your VS Code projects without committing credentials to a specific repository, place the exact same JSON block into your global user configuration file instead:
  * Windows: %APPDATA%\Code\User\mcp.json
  * macOS/Linux: ~/.config/Code/User/mcp.json
+
+
+
+
+Here is how you configure PostgreSQL for your workspace using standard stdio configuration in .vscode/mcp.json. This approach spins up the tool natively so it's fully visible and accessible to GitHub Copilot Agent mode and its subagents.
+1. The MCP Command
+The server runs via npx using the connection string directly as an argument, meaning no separate global installation command is required beforehand—VS Code will fetch and spin it up automatically through npx -y.
+2. Update .vscode/mcp.json
+Add the following block to your .vscode/mcp.json file:
+{
+  "servers": {
+    "postgresDatabase": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://your_user:your_password@localhost:5432/your_database"
+      ]
+    }
+  }
+}
+
+> Note on parameters:
+>  * Replace your_user, your_password, localhost:5432, and your_database with your actual PostgreSQL credentials and connection details.
+>  * This specific MCP package automatically wraps transactions in read-only mode, safeguarding your database from accidental writes or drops by subagents.
+> 
+
+
